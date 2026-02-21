@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import sqlite3
 from typing import Optional
 
 from .db import get_conn
@@ -30,6 +31,7 @@ class QueuedEmail:
 def enqueue_email(
     *,
     webhook_id: int,
+    idempotency_key: Optional[str] = None,
     to_addr: str,
     from_addr: str,
     subject: str,
@@ -37,25 +39,39 @@ def enqueue_email(
     message_bytes: bytes,
 ) -> int:
     now = _now_iso()
+    idem = (idempotency_key or "").strip() or None
     with get_conn() as conn:
-        cur = conn.execute(
-            "insert into outbound_queue("
-            "created_at, updated_at, status, webhook_id, to_addr, from_addr, "
-            "subject, body_text, message_bytes, attempts, next_attempt_at, "
-            "last_error"
-            ") values(?, ?, 'pending', ?, ?, ?, ?, ?, ?, 0, ?, '')",
-            (
-                now,
-                now,
-                int(webhook_id),
-                to_addr,
-                from_addr,
-                subject,
-                body_text,
-                message_bytes,
-                now,
-            ),
-        )
+        try:
+            cur = conn.execute(
+                "insert into outbound_queue("
+                "created_at, updated_at, status, webhook_id, idempotency_key, "
+                "to_addr, from_addr, subject, body_text, message_bytes, "
+                "attempts, next_attempt_at, last_error"
+                ") values(?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 0, ?, '')",
+                (
+                    now,
+                    now,
+                    int(webhook_id),
+                    idem,
+                    to_addr,
+                    from_addr,
+                    subject,
+                    body_text,
+                    message_bytes,
+                    now,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            if not idem:
+                raise
+            row = conn.execute(
+                "select id from outbound_queue "
+                "where webhook_id = ? and idempotency_key = ?",
+                (int(webhook_id), idem),
+            ).fetchone()
+            if row is None:
+                raise
+            return int(row["id"])
         conn.commit()
         return int(cur.lastrowid)
 

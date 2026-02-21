@@ -7,7 +7,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
 from .ip_rules import ensure_default_rules, is_ip_allowed, list_rules
-from .rate_limit import SlidingWindowRateLimiter
+from .rate_limit import SqliteFixedWindowRateLimiter
 from .webhook_ip_rules import (
     has_any_rules as webhook_has_any_rules,
     is_ip_allowed as is_webhook_ip_allowed,
@@ -25,7 +25,11 @@ def create_receiver_app() -> FastAPI:
     ensure_default_webhook()
     app = FastAPI(title="MAIL_API Receiver")
 
-    limiter = SlidingWindowRateLimiter(max_requests=120, window_seconds=60)
+    limiter = SqliteFixedWindowRateLimiter(
+        scope="receiver",
+        max_requests=120,
+        window_seconds=60,
+    )
 
     @app.middleware("http")
     async def _rate_limit_middleware(request: Request, call_next):
@@ -38,6 +42,48 @@ def create_receiver_app() -> FastAPI:
                 headers={"Retry-After": str(r.retry_after_seconds)},
             )
         return await call_next(request)
+
+    def _content_length_too_large(request: Request, *, max_bytes: int) -> bool:
+        raw = (request.headers.get("content-length") or "").strip()
+        if not raw:
+            return False
+        try:
+            n = int(raw)
+        except ValueError:
+            return False
+        return n > max_bytes
+
+    def _validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        msg_type = str(payload.get("type", "")).strip()
+        to_addr = str(payload.get("to", "")).strip()
+        subject = str(payload.get("subject", "")).strip()
+        token = str(payload.get("token", "")).strip()
+        expires_at = str(payload.get("expiresAt", "")).strip()
+        link = payload.get("link")
+        from_localpart = str(payload.get("fromLocalPart", "")).strip()
+
+        if msg_type not in {"email_verification", "password_reset"}:
+            raise HTTPException(status_code=400, detail="invalid type")
+        if not to_addr or "@" not in to_addr:
+            raise HTTPException(status_code=400, detail="invalid to")
+        if not subject:
+            raise HTTPException(status_code=400, detail="invalid subject")
+        if not token:
+            raise HTTPException(status_code=400, detail="invalid token")
+        if not expires_at:
+            raise HTTPException(status_code=400, detail="invalid expiresAt")
+        if link is not None and not isinstance(link, str):
+            raise HTTPException(status_code=400, detail="invalid link")
+
+        return {
+            "msg_type": msg_type,
+            "to_addr": to_addr,
+            "subject": subject,
+            "token": token,
+            "expires_at": expires_at,
+            "link": link,
+            "from_localpart": from_localpart,
+        }
 
     @app.get("/healthz")
     async def healthz(request: Request):
@@ -63,6 +109,9 @@ def create_receiver_app() -> FastAPI:
             alias="X-TransLife-Signature",
         ),
     ):
+        if _content_length_too_large(request, max_bytes=64 * 1024):
+            raise HTTPException(status_code=413, detail="payload too large")
+
         client_ip = get_real_client_ip(request)
         rules = list_rules()
         if not is_ip_allowed(client_ip, rules):
@@ -83,6 +132,8 @@ def create_receiver_app() -> FastAPI:
                 raise HTTPException(status_code=403, detail="forbidden")
 
         raw_body = await request.body()
+        if len(raw_body) > (64 * 1024):
+            raise HTTPException(status_code=413, detail="payload too large")
 
         if not wh.webhook_secret.strip():
             raise HTTPException(
@@ -106,24 +157,17 @@ def create_receiver_app() -> FastAPI:
         except Exception:
             raise HTTPException(status_code=400, detail="invalid json")
 
-        msg_type = str(payload.get("type", "")).strip()
-        to_addr = str(payload.get("to", "")).strip()
-        subject = str(payload.get("subject", "")).strip()
-        token = str(payload.get("token", "")).strip()
-        expires_at = str(payload.get("expiresAt", "")).strip()
-        link = payload.get("link")
-        from_localpart = str(payload.get("fromLocalPart", "")).strip()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="invalid json")
 
-        if msg_type not in {"email_verification", "password_reset"}:
-            raise HTTPException(status_code=400, detail="invalid type")
-        if not to_addr or "@" not in to_addr:
-            raise HTTPException(status_code=400, detail="invalid to")
-        if not subject:
-            raise HTTPException(status_code=400, detail="invalid subject")
-        if not token:
-            raise HTTPException(status_code=400, detail="invalid token")
-        if not expires_at:
-            raise HTTPException(status_code=400, detail="invalid expiresAt")
+        v = _validate_payload(payload)
+        msg_type = str(v["msg_type"])
+        to_addr = str(v["to_addr"])
+        subject = str(v["subject"])
+        token = str(v["token"])
+        expires_at = str(v["expires_at"])
+        link = v["link"]
+        from_localpart = str(v["from_localpart"])
 
         from_addr = (wh.sender_email or "").strip()
         if not from_addr or "@" not in from_addr:
@@ -154,9 +198,14 @@ def create_receiver_app() -> FastAPI:
             from_name=sender_name,
         )
 
+        idempotency_key = (request.headers.get("x-idempotency-key") or "").strip()
+        if idempotency_key and len(idempotency_key) > 120:
+            raise HTTPException(status_code=400, detail="invalid idempotency key")
+
         try:
             queue_id = enqueue_email(
                 webhook_id=wh.id,
+                idempotency_key=(idempotency_key or None),
                 to_addr=to_addr,
                 from_addr=from_addr,
                 subject=subject,
@@ -171,6 +220,7 @@ def create_receiver_app() -> FastAPI:
             "to": to_addr,
             "subject": subject,
             "queued_id": queue_id,
+            "idempotency_key": idempotency_key or None,
             "queued_at": datetime.utcnow().isoformat() + "Z",
         }
 

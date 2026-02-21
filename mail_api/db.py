@@ -133,6 +133,7 @@ def init_db() -> None:
                 updated_at text not null,
                 status text not null,
                 webhook_id integer not null default 0,
+                idempotency_key text,
                 to_addr text not null,
                 from_addr text not null,
                 subject text not null,
@@ -156,6 +157,19 @@ def init_db() -> None:
                 "alter table outbound_queue "
                 "add column webhook_id integer not null default 0"
             )
+        if "idempotency_key" not in cols:
+            conn.execute(
+                "alter table outbound_queue add column idempotency_key text"
+            )
+
+        conn.execute(
+            (
+                "create unique index if not exists "
+                "idx_outbound_queue_idempotency "
+                "on outbound_queue(webhook_id, idempotency_key) "
+                "where idempotency_key is not null"
+            )
+        )
         conn.execute(
             """
             create table if not exists admin_users (
@@ -196,6 +210,29 @@ def init_db() -> None:
                 action text not null,
                 details text not null,
                 created_at text not null
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            create table if not exists rate_limit_windows (
+                scope text not null,
+                key text not null,
+                window_start integer not null,
+                count integer not null,
+                primary key(scope, key)
+            )
+            """
+        )
+        conn.execute(
+            """
+            create table if not exists login_failures (
+                ip text not null,
+                username text not null,
+                attempts integer not null,
+                until_monotonic real not null,
+                primary key(ip, username)
             )
             """
         )

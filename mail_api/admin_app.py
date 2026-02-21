@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import os
 import sqlite3
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -29,7 +29,7 @@ from .client_ip import get_real_client_ip, is_trusted_proxy_peer
 from .delivery_log import iter_recent_lines, append_log_line
 from .emailer import build_message
 from .smtp_delivery import send_via_smtp
-from .rate_limit import SlidingWindowRateLimiter
+from .rate_limit import SqliteFixedWindowRateLimiter
 from .webhooks import (
     create_webhook,
     ensure_default_webhook,
@@ -186,9 +186,11 @@ def create_admin_app() -> FastAPI:
 
     app = FastAPI(title="MAIL_API Control Panel")
 
-    limiter = SlidingWindowRateLimiter(max_requests=240, window_seconds=60)
-
-    login_failures: dict[str, tuple[int, float]] = {}
+    limiter = SqliteFixedWindowRateLimiter(
+        scope="admin",
+        max_requests=240,
+        window_seconds=60,
+    )
 
     def _csrf_token_for_request(request: Request) -> str:
         s = get_csrf_serializer()
@@ -220,26 +222,71 @@ def create_admin_app() -> FastAPI:
         return "u" not in data
 
     def _login_is_allowed(*, ip: str, username: str) -> tuple[bool, int]:
-        key = f"{ip}:{username.strip().lower()}"
-        entry = login_failures.get(key)
-        if entry is None:
+        key_ip = ip.strip()
+        key_user = username.strip().lower()
+        if not key_ip or not key_user:
             return (True, 0)
-        _, until = entry
-        now = time.monotonic()
-        if now >= until:
-            return (True, 0)
-        return (False, int(max(1.0, until - now)))
+
+        now = time.time()
+        with get_conn() as conn:
+            row = conn.execute(
+                (
+                    "select attempts, until_monotonic "
+                    "from login_failures where ip = ? and username = ?"
+                ),
+                (key_ip, key_user),
+            ).fetchone()
+            if row is None:
+                return (True, 0)
+            until = float(row["until_monotonic"])
+            if now >= until:
+                return (True, 0)
+            return (False, int(max(1.0, until - now)))
 
     def _record_login_failure(*, ip: str, username: str) -> None:
-        key = f"{ip}:{username.strip().lower()}"
-        attempts, until = login_failures.get(key, (0, 0.0))
-        attempts += 1
-        backoff = min(300.0, float(2 ** min(attempts, 8)))
-        login_failures[key] = (attempts, time.monotonic() + backoff)
+        key_ip = ip.strip()
+        key_user = username.strip().lower()
+        if not key_ip or not key_user:
+            return
+
+        now = time.time()
+        with get_conn() as conn:
+            row = conn.execute(
+                (
+                    "select attempts from login_failures "
+                    "where ip = ? and username = ?"
+                ),
+                (key_ip, key_user),
+            ).fetchone()
+            attempts = int(row["attempts"]) if row is not None else 0
+            attempts += 1
+            backoff = min(300.0, float(2 ** min(attempts, 8)))
+            until = now + backoff
+            conn.execute(
+                (
+                    "insert into login_failures(" 
+                    "ip, username, attempts, until_monotonic" 
+                    ") values(?, ?, ?, ?) "
+                    "on conflict(ip, username) do update set "
+                    "attempts = excluded.attempts, "
+                    "until_monotonic = excluded.until_monotonic"
+                ),
+                (key_ip, key_user, attempts, until),
+            )
+            conn.commit()
 
     def _clear_login_failures(*, ip: str, username: str) -> None:
-        key = f"{ip}:{username.strip().lower()}"
-        login_failures.pop(key, None)
+        key_ip = ip.strip()
+        key_user = username.strip().lower()
+        if not key_ip or not key_user:
+            return
+
+        with get_conn() as conn:
+            conn.execute(
+                "delete from login_failures where ip = ? and username = ?",
+                (key_ip, key_user),
+            )
+            conn.commit()
 
     @app.middleware("http")
     async def _security_middleware(request: Request, call_next):
@@ -652,6 +699,7 @@ def create_admin_app() -> FastAPI:
             port = 993
 
         try:
+            c: Any
             if (wh.imap_security or "ssl") == "ssl":
                 c = imaplib.IMAP4_SSL(host=wh.imap_host, port=port)
             else:
@@ -723,6 +771,7 @@ def create_admin_app() -> FastAPI:
             port = 995
 
         try:
+            c: Any
             if (wh.pop3_security or "ssl") == "ssl":
                 c = poplib.POP3_SSL(
                     host=wh.pop3_host,

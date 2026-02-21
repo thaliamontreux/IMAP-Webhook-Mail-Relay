@@ -33,3 +33,27 @@ If you enable the provided Nginx template (`--nginx`), Nginx will listen on port
 If you put Nginx in front, set the control panel setting:
 
 - `Trusted proxy CIDRs`: include the Nginx IP, e.g. `127.0.0.1/32`
+
+## Hardening checklist (no 2FA)
+
+- **Terminate TLS at Nginx**
+  - Use the provided `nginx-example.conf` (TLS on port `2500`) as a starting point.
+  - Ensure `X-Forwarded-Proto` is set by Nginx (templates already do this).
+
+- **Restrict admin access**
+  - Prefer restricting `/admin/` at the Nginx layer (allowlist) in addition to MAIL_API IP rules.
+  - Also configure MAIL_API IP rules (`IP Rules` page) to only allow your admin networks.
+
+- **Trusted proxy CIDRs**
+  - Set `Trusted proxy CIDRs` to include the Nginx IP/CIDR so the app can correctly determine the real client IP.
+  - Example when proxying locally: `127.0.0.1/32`
+
+- **Request size limits**
+  - The receiver enforces a 64KB max request size.
+  - Set `client_max_body_size 64k;` in Nginx for consistent behavior.
+
+- **Persistent protections**
+  - Rate limiting and login lockout are stored in SQLite (in `/var/lib/mail_api/mail_api.db` by default).
+
+- **Idempotency**
+  - Clients may include `X-Idempotency-Key` (max 120 chars). Replays with the same key will return the same queue id.

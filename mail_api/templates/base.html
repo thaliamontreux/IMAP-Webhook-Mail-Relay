@@ -378,6 +378,13 @@
               <i class="fa-solid fa-users-gear"></i>
               Admins
             </a>
+            <a
+              class="side-link {% if path.startswith('/2fa') %}active{% endif %}"
+              href="{{ prefix }}/2fa"
+            >
+              <i class="fa-solid fa-shield"></i>
+              2FA
+            </a>
           </div>
 
           <div class="sidebar-footer">

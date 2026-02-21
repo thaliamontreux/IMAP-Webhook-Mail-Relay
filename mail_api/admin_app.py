@@ -30,6 +30,7 @@ from .delivery_log import iter_recent_lines, append_log_line
 from .emailer import build_message
 from .smtp_delivery import send_via_smtp
 from .rate_limit import SqliteFixedWindowRateLimiter
+from .totp import build_provisioning_uri, generate_base32_secret, verify_totp
 from .webhooks import (
     create_webhook,
     ensure_default_webhook,
@@ -160,6 +161,51 @@ def _list_admins() -> list[dict]:
             }
             for r in rows
         ]
+
+
+def _get_admin_totp(username: str) -> tuple[bool, str]:
+    u = (username or "").strip()
+    if not u:
+        return (False, "")
+    with get_conn() as conn:
+        row = conn.execute(
+            "select totp_enabled, totp_secret from admin_users where username = ?",
+            (u,),
+        ).fetchone()
+        if row is None:
+            return (False, "")
+        return (int(row["totp_enabled"]) == 1, str(row["totp_secret"] or ""))
+
+
+def _set_admin_totp_secret(username: str, secret: str) -> None:
+    u = (username or "").strip()
+    s = (secret or "").strip()
+    with get_conn() as conn:
+        conn.execute(
+            "update admin_users set totp_secret = ?, totp_enabled = 0 where username = ?",
+            (s, u),
+        )
+        conn.commit()
+
+
+def _enable_admin_totp(username: str) -> None:
+    u = (username or "").strip()
+    with get_conn() as conn:
+        conn.execute(
+            "update admin_users set totp_enabled = 1 where username = ?",
+            (u,),
+        )
+        conn.commit()
+
+
+def _disable_admin_totp(username: str) -> None:
+    u = (username or "").strip()
+    with get_conn() as conn:
+        conn.execute(
+            "update admin_users set totp_enabled = 0, totp_secret = '' where username = ?",
+            (u,),
+        )
+        conn.commit()
 
 
 def _authenticate(username: str, password: str) -> bool:
@@ -1193,6 +1239,128 @@ def create_admin_app() -> FastAPI:
             },
         )
 
+    @app.get("/2fa", response_class=HTMLResponse)
+    async def totp_get(request: Request):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        enabled, secret = _get_admin_totp(u)
+        uri = ""
+        if secret:
+            uri = build_provisioning_uri(
+                secret=secret,
+                account=u,
+                issuer="MAIL_API",
+            )
+        return templates.TemplateResponse(
+            "totp.html",
+            {
+                "request": request,
+                "user": u,
+                "prefix": _get_forwarded_prefix(request),
+                "totp_enabled": enabled,
+                "totp_secret": secret,
+                "otpauth_uri": uri,
+            },
+        )
+
+    @app.post("/2fa/generate")
+    async def totp_generate(request: Request):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        secret = generate_base32_secret()
+        _set_admin_totp_secret(u, secret)
+        _audit(u, "totp_generate", "")
+        return RedirectResponse(
+            url=_prefixed(request, "/2fa"),
+            status_code=302,
+        )
+
+    @app.post("/2fa/enable", response_class=HTMLResponse)
+    async def totp_enable(request: Request, code: str = Form("")):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        enabled, secret = _get_admin_totp(u)
+        if enabled:
+            return RedirectResponse(url=_prefixed(request, "/2fa"), status_code=302)
+        if not secret:
+            return templates.TemplateResponse(
+                "totp.html",
+                {
+                    "request": request,
+                    "user": u,
+                    "prefix": _get_forwarded_prefix(request),
+                    "totp_enabled": False,
+                    "totp_secret": "",
+                    "otpauth_uri": "",
+                    "error": "generate a secret first",
+                },
+                status_code=400,
+            )
+
+        if not verify_totp(secret=secret, code=code):
+            uri = build_provisioning_uri(
+                secret=secret,
+                account=u,
+                issuer="MAIL_API",
+            )
+            return templates.TemplateResponse(
+                "totp.html",
+                {
+                    "request": request,
+                    "user": u,
+                    "prefix": _get_forwarded_prefix(request),
+                    "totp_enabled": False,
+                    "totp_secret": secret,
+                    "otpauth_uri": uri,
+                    "error": "invalid code",
+                },
+                status_code=400,
+            )
+
+        _enable_admin_totp(u)
+        _audit(u, "totp_enable", "")
+        return RedirectResponse(
+            url=_prefixed(request, "/2fa"),
+            status_code=302,
+        )
+
+    @app.post("/2fa/disable", response_class=HTMLResponse)
+    async def totp_disable(request: Request, code: str = Form("")):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        enabled, secret = _get_admin_totp(u)
+        if not enabled:
+            return RedirectResponse(url=_prefixed(request, "/2fa"), status_code=302)
+        if not secret:
+            raise HTTPException(status_code=400, detail="2fa misconfigured")
+
+        if not verify_totp(secret=secret, code=code):
+            uri = build_provisioning_uri(
+                secret=secret,
+                account=u,
+                issuer="MAIL_API",
+            )
+            return templates.TemplateResponse(
+                "totp.html",
+                {
+                    "request": request,
+                    "user": u,
+                    "prefix": _get_forwarded_prefix(request),
+                    "totp_enabled": True,
+                    "totp_secret": secret,
+                    "otpauth_uri": uri,
+                    "error": "invalid code",
+                },
+                status_code=400,
+            )
+
+        _disable_admin_totp(u)
+        _audit(u, "totp_disable", "")
+        return RedirectResponse(
+            url=_prefixed(request, "/2fa"),
+            status_code=302,
+        )
+
     @app.get("/login", response_class=HTMLResponse)
     async def login_get(request: Request):
         _require_ip_allowed(request)
@@ -1215,6 +1383,7 @@ def create_admin_app() -> FastAPI:
         request: Request,
         username: str = Form(...),
         password: str = Form(...),
+        code: str = Form(""),
     ):
         _require_ip_allowed(request)
         ip = _get_client_ip(request)
@@ -1227,6 +1396,7 @@ def create_admin_app() -> FastAPI:
                     "error": f"too many attempts; retry in {wait_seconds}s",
                     "has_admin": _has_any_admin(),
                     "prefix": _get_forwarded_prefix(request),
+                    "username": username,
                 },
                 status_code=429,
             )
@@ -1240,9 +1410,40 @@ def create_admin_app() -> FastAPI:
                     "error": "invalid credentials",
                     "has_admin": _has_any_admin(),
                     "prefix": _get_forwarded_prefix(request),
+                    "username": username,
                 },
                 status_code=401,
             )
+
+        enabled, secret = _get_admin_totp(username)
+        if enabled:
+            if not secret.strip():
+                return templates.TemplateResponse(
+                    "login.html",
+                    {
+                        "request": request,
+                        "error": "2fa misconfigured",
+                        "has_admin": _has_any_admin(),
+                        "prefix": _get_forwarded_prefix(request),
+                        "username": username,
+                        "totp_required": True,
+                    },
+                    status_code=403,
+                )
+            if not verify_totp(secret=secret, code=code):
+                _record_login_failure(ip=ip, username=username)
+                return templates.TemplateResponse(
+                    "login.html",
+                    {
+                        "request": request,
+                        "error": "invalid 2fa code",
+                        "has_admin": _has_any_admin(),
+                        "prefix": _get_forwarded_prefix(request),
+                        "username": username,
+                        "totp_required": True,
+                    },
+                    status_code=401,
+                )
 
         _clear_login_failures(ip=ip, username=username)
         s = get_session_serializer()

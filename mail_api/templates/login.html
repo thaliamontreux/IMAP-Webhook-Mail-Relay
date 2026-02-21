@@ -22,6 +22,7 @@
         class="form-control"
         name="username"
         autocomplete="username"
+        value="{{ username | default('') }}"
         autofocus
       />
     </div>
@@ -35,6 +36,19 @@
         autocomplete="current-password"
       />
     </div>
+
+    {% if totp_required %}
+      <div class="mb-3">
+        <label class="form-label">2FA Code</label>
+        <input
+          class="form-control"
+          name="code"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          placeholder="123456"
+        />
+      </div>
+    {% endif %}
 
     <div class="d-grid">
       <button type="submit" class="btn btn-primary">

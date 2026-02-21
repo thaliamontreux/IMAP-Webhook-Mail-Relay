@@ -177,10 +177,29 @@ def init_db() -> None:
                 username text not null unique,
                 password_hash text not null,
                 is_active integer not null default 1,
+                totp_enabled integer not null default 0,
+                totp_secret text not null default '',
                 created_at text not null
             )
             """
         )
+
+        admin_cols = {
+            str(r["name"])
+            for r in conn.execute(
+                "pragma table_info(admin_users)"
+            ).fetchall()
+        }
+        if "totp_enabled" not in admin_cols:
+            conn.execute(
+                "alter table admin_users "
+                "add column totp_enabled integer not null default 0"
+            )
+        if "totp_secret" not in admin_cols:
+            conn.execute(
+                "alter table admin_users "
+                "add column totp_secret text not null default ''"
+            )
         conn.execute(
             """
             create table if not exists ip_rules (

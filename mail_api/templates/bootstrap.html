@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% set show_nav = false %}
+
+{% block page_title %}MAIL_API - Initialize{% endblock %}
+
+{% block auth_content %}
+  <h1 class="h4 mb-1">Initialize control panel</h1>
+  <p class="mb-4" style="color: var(--muted);">
+    Create the first administrator account.
+  </p>
+
+  {% if error %}
+    <div class="alert alert-danger mb-3" role="alert">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  <form method="post" action="{{ prefix }}/bootstrap">
+    <div class="mb-3">
+      <label class="form-label">Username</label>
+      <input class="form-control" name="username" autocomplete="username" />
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Password (min 10 chars)</label>
+      <input
+        class="form-control"
+        name="password"
+        type="password"
+        autocomplete="new-password"
+      />
+    </div>
+
+    <div class="d-grid">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-user-shield me-2"></i>
+        Create Admin
+      </button>
+    </div>
+  </form>
+{% endblock %}

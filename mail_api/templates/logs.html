@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block page_title %}MAIL_API - Logs{% endblock %}
+{% block header_title %}Logs{% endblock %}
+
+{% block content %}
+  <div class="card-glass p-4">
+    <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
+      <div>
+        <h2 class="h5 mb-1">Delivery logs</h2>
+        <div style="color: var(--muted);">Log file is capped at 5MB.</div>
+      </div>
+    </div>
+
+    <div class="mt-3">
+      <pre class="log-box mb-0">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+    </div>
+  </div>
+{% endblock %}

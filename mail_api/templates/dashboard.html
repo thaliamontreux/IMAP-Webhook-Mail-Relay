@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block page_title %}MAIL_API - Dashboard{% endblock %}
+{% block header_title %}Dashboard{% endblock %}
+
+{% block content %}
+  <div class="row g-3">
+    <div class="col-12 col-lg-7">
+      <div class="card-glass p-4">
+        <h2 class="h4 mb-2">System Overview</h2>
+        <p class="mb-0" style="color: var(--muted);">
+          Receiver: <b>2555</b>
+          <span class="mx-2">|</span>
+          Control panel: <b>2580</b>
+        </p>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-5">
+      <div class="card-glass p-4">
+        <h2 class="h4 mb-3">Quick Actions</h2>
+        <div class="d-grid gap-2">
+          <a class="btn btn-primary" href="{{ prefix }}/settings">
+            <i class="fa-solid fa-sliders me-2"></i>
+            Configure settings
+          </a>
+          <a class="btn btn-outline-light" href="{{ prefix }}/smtp">
+            <i class="fa-solid fa-paper-plane me-2"></i>
+            Configure SMTP relay
+          </a>
+          <a class="btn btn-outline-light" href="{{ prefix }}/logs">
+            <i class="fa-solid fa-rectangle-list me-2"></i>
+            View delivery logs
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block page_title %}MAIL_API - Webhook{% endblock %}
+{% block header_title %}Webhook{% endblock %}
+
+{% block content %}
+  <div class="row g-3">
+    <div class="col-12 col-xl-7">
+      <div class="card-glass p-4">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
+          <div>
+            <h2 class="h5 mb-1">{{ webhook.name }}</h2>
+            <div style="color: var(--muted);">
+              Receiver header:
+              <code style="color: rgba(255,255,255,0.82);">X-Relay-Key: {{ webhook.relay_key }}</code>
+            </div>
+          </div>
+          <div>
+            <a class="btn btn-outline-light" href="{{ prefix }}/webhooks/{{ webhook.id }}/smtp">
+              <i class="fa-solid fa-paper-plane me-2"></i>
+              Configure SMTP
+            </a>
+          </div>
+        </div>
+
+        <form method="post" action="{{ prefix }}/webhooks/{{ webhook.id }}" class="mt-3">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label">Display name</label>
+              <input class="form-control" name="name" value="{{ webhook.name }}" />
+            </div>
+
+            <div class="col-12">
+              <label class="form-label">Sender Email (required)</label>
+              <input
+                class="form-control"
+                name="sender_email"
+                value="{{ webhook.sender_email }}"
+                placeholder="no-reply@example.com"
+              />
+              <div class="form-text" style="color: var(--muted);">
+                This is used as the default envelope-from and From header address.
+              </div>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label">Webhook Secret (HMAC)</label>
+              <input
+                class="form-control"
+                name="webhook_secret"
+                value="{{ webhook.webhook_secret }}"
+                placeholder="hex secret"
+              />
+            </div>
+
+            <div class="col-12 col-lg-6">
+              <label class="form-label">Timestamp Skew Seconds</label>
+              <input
+                class="form-control"
+                name="timestamp_skew_seconds"
+                value="{{ webhook.timestamp_skew_seconds }}"
+              />
+            </div>
+
+            <div class="col-12 col-lg-6 d-flex align-items-end">
+              <div class="form-check">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  name="is_active"
+                  value="1"
+                  id="is_active"
+                  {% if webhook.is_active %}checked{% endif %}
+                />
+                <label class="form-check-label" for="is_active">
+                  Enabled
+                </label>
+              </div>
+            </div>
+
+            <div class="col-12">
+              <div class="form-check">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  name="allow_from_override"
+                  value="1"
+                  id="allow_from_override"
+                  {% if webhook.allow_from_override %}checked{% endif %}
+                />
+                <label class="form-check-label" for="allow_from_override">
+                  Allow caller to override sender local-part (`fromLocalPart`)
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-grid mt-3">
+            <button type="submit" class="btn btn-primary">
+              <i class="fa-solid fa-floppy-disk me-2"></i>
+              Save webhook
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="col-12 col-xl-5">
+      <div class="card-glass p-4">
+        <h2 class="h5 mb-3">Integration snippet</h2>
+
+        <div style="color: var(--muted);" class="mb-2">
+          Receiver URL:
+          <code style="color: rgba(255,255,255,0.82);">POST /webhook/outbound-email</code>
+        </div>
+
+        <pre class="log-box">X-Relay-Key: {{ webhook.relay_key }}
+X-TransLife-Timestamp: 2026-02-21T05:35:10Z
+X-TransLife-Signature: hex(hmac_sha256(secret, timestamp + "." + rawBody))</pre>
+
+        <div style="color: var(--muted);">
+          Configure SMTP for this webhook before enabling it.
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

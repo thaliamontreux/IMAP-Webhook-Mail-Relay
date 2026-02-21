@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block page_title %}MAIL_API - Admins{% endblock %}
+{% block header_title %}Admins{% endblock %}
+
+{% block content %}
+  <div class="row g-3">
+    <div class="col-12 col-xl-7">
+      <div class="card-glass p-4">
+        <h2 class="h5 mb-3">Admin users</h2>
+
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for a in admins %}
+                <tr>
+                  <td><b>{{ a.username }}</b></td>
+                  <td>
+                    {% if a.is_active %}
+                      <span class="badge text-bg-success">active</span>
+                    {% else %}
+                      <span class="badge text-bg-secondary">disabled</span>
+                    {% endif %}
+                  </td>
+                  <td style="color: var(--muted);">{{ a.created_at }}</td>
+                  <td class="text-end">
+                    {% if a.is_active %}
+                      <form method="post" action="{{ prefix }}/admins/disable" class="m-0">
+                        <input type="hidden" name="username" value="{{ a.username }}" />
+                        <button type="submit" class="btn btn-sm btn-outline-light">
+                          <i class="fa-solid fa-user-slash me-1"></i>
+                          Disable
+                        </button>
+                      </form>
+                    {% else %}
+                      <form method="post" action="{{ prefix }}/admins/enable" class="m-0">
+                        <input type="hidden" name="username" value="{{ a.username }}" />
+                        <button type="submit" class="btn btn-sm btn-primary">
+                          <i class="fa-solid fa-user-check me-1"></i>
+                          Enable
+                        </button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-xl-5">
+      <div class="card-glass p-4">
+        <h2 class="h5 mb-3">Create admin</h2>
+
+        <form method="post" action="{{ prefix }}/admins/create">
+          <div class="mb-3">
+            <label class="form-label">Username</label>
+            <input class="form-control" name="username" autocomplete="username" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Password (min 10 chars)</label>
+            <input
+              class="form-control"
+              name="password"
+              type="password"
+              autocomplete="new-password"
+            />
+          </div>
+
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary">
+              <i class="fa-solid fa-user-plus me-2"></i>
+              Create
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endblock %}

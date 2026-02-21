@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block page_title %}MAIL_API - Webhooks{% endblock %}
+{% block header_title %}Webhooks{% endblock %}
+
+{% block content %}
+  <div class="row g-3">
+    <div class="col-12 col-xl-7">
+      <div class="card-glass p-4">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
+          <div>
+            <h2 class="h5 mb-1">Configured webhooks</h2>
+            <div style="color: var(--muted);">
+              Each webhook has its own relay key, signature secret, sender email, and relay settings.
+            </div>
+          </div>
+        </div>
+
+        <div class="table-responsive mt-3">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Sender</th>
+                <th>Relay Key</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for wh in webhooks %}
+                <tr>
+                  <td><b>{{ wh.name }}</b></td>
+                  <td>
+                    {% if wh.is_active %}
+                      <span class="badge text-bg-success">active</span>
+                    {% else %}
+                      <span class="badge text-bg-secondary">disabled</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if wh.sender_email %}
+                      <code style="color: rgba(255,255,255,0.82);">{{ wh.sender_email }}</code>
+                    {% else %}
+                      <span style="color: var(--muted);">not set</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <code style="color: rgba(255,255,255,0.82);">{{ wh.relay_key }}</code>
+                  </td>
+                  <td class="text-end">
+                    <a class="btn btn-sm btn-outline-light" href="{{ prefix }}/webhooks/{{ wh.id }}">
+                      <i class="fa-solid fa-pen-to-square me-1"></i>
+                      Manage
+                    </a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-xl-5">
+      <div class="card-glass p-4">
+        <h2 class="h5 mb-3">Create webhook</h2>
+
+        <form method="post" action="{{ prefix }}/webhooks/create">
+          <div class="mb-3">
+            <label class="form-label">Display name</label>
+            <input class="form-control" name="name" placeholder="Auth Service" />
+          </div>
+
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary">
+              <i class="fa-solid fa-plus me-2"></i>
+              Create
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card-glass p-4 mt-3">
+        <h2 class="h6 mb-2" style="color: var(--muted);">How senders call MAIL_API</h2>
+        <div style="color: var(--muted);">
+          Use the receiver URL and include:
+          <br />
+          <code style="color: rgba(255,255,255,0.82);">X-Relay-Key: &lt;relay_key&gt;</code>
+          <br />
+          plus the signature headers:
+          <br />
+          <code style="color: rgba(255,255,255,0.82);">X-TransLife-Timestamp</code>
+          <br />
+          <code style="color: rgba(255,255,255,0.82);">X-TransLife-Signature</code>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

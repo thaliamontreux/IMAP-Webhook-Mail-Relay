@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block page_title %}MAIL_API - Settings{% endblock %}
+{% block header_title %}Settings{% endblock %}
+
+{% block content %}
+  <form method="post" action="{{ prefix }}/settings">
+    <div class="row g-3">
+      <div class="col-12 col-xl-7">
+        <div class="card-glass p-4">
+          <h2 class="h5 mb-3">Webhook verification</h2>
+
+          <div class="mb-3">
+            <label class="form-label">Webhook Secret</label>
+            <input
+              class="form-control"
+              name="webhook_secret"
+              value="{{ values['webhook_secret'] }}"
+              placeholder="Paste shared secret"
+            />
+          </div>
+
+          <div class="mb-0">
+            <label class="form-label">Timestamp Skew Seconds</label>
+            <input
+              class="form-control"
+              name="timestamp_skew_seconds"
+              value="{{ values['timestamp_skew_seconds'] }}"
+            />
+            <div class="form-text" style="color: var(--muted);">
+              Replay protection window. Default is 300 seconds.
+            </div>
+          </div>
+        </div>
+
+        <div class="card-glass p-4 mt-3">
+          <h2 class="h5 mb-3">Sender policy</h2>
+
+          <div class="mb-3">
+            <label class="form-label">Allowed Sender Domain</label>
+            <input
+              class="form-control"
+              name="allowed_sender_domain"
+              value="{{ values['allowed_sender_domain'] }}"
+              placeholder="example.com"
+            />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Default From Localpart</label>
+            <input
+              class="form-control"
+              name="default_from_localpart"
+              value="{{ values['default_from_localpart'] }}"
+              placeholder="no-reply"
+            />
+          </div>
+
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              name="allow_from_override"
+              value="1"
+              id="allow_from_override"
+              {% if values['allow_from_override'] in ['1','true','on','yes'] %}checked{% endif %}
+            />
+            <label class="form-check-label" for="allow_from_override">
+              Allow webhook payload to set From local-part (`fromLocalPart`)
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-5">
+        <div class="card-glass p-4">
+          <h2 class="h5 mb-3">Network & reverse proxy</h2>
+
+          <div class="mb-3">
+            <label class="form-label">Receiver bind host (port 2555)</label>
+            <input
+              class="form-control"
+              name="receiver_bind_host"
+              value="{{ values['receiver_bind_host'] }}"
+            />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Control panel bind host (port 2580)</label>
+            <input
+              class="form-control"
+              name="admin_bind_host"
+              value="{{ values['admin_bind_host'] }}"
+            />
+          </div>
+
+          <div class="mb-0">
+            <label class="form-label">Trusted proxy CIDRs (for X-Forwarded-For)</label>
+            <textarea
+              class="form-control"
+              name="trusted_proxy_cidrs"
+              rows="5"
+              placeholder="127.0.0.1/32"
+            >{{ values['trusted_proxy_cidrs'] }}</textarea>
+          </div>
+        </div>
+
+        <div class="card-glass p-4 mt-3">
+          <h2 class="h6 mb-3" style="color: var(--muted);">Advanced</h2>
+
+          <div class="mb-0">
+            <label class="form-label">Sendmail Path (legacy)</label>
+            <input
+              class="form-control"
+              name="sendmail_path"
+              value="{{ values['sendmail_path'] }}"
+            />
+          </div>
+        </div>
+
+        <div class="d-grid mt-3">
+          <button type="submit" class="btn btn-primary">
+            <i class="fa-solid fa-floppy-disk me-2"></i>
+            Save settings
+          </button>
+        </div>
+      </div>
+    </div>
+  </form>
+{% endblock %}

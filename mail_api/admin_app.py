@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import os
 import sqlite3
+import time
 from typing import Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .db import get_conn
@@ -17,12 +18,18 @@ from .ip_rules import (
     is_ip_allowed,
     list_rules,
 )
-from .security import get_session_serializer, hash_password, verify_password
+from .security import (
+    get_csrf_serializer,
+    get_session_serializer,
+    hash_password,
+    verify_password,
+)
 from .settings import DEFAULTS, get_setting, set_setting
 from .client_ip import get_real_client_ip, is_trusted_proxy_peer
 from .delivery_log import iter_recent_lines, append_log_line
 from .emailer import build_message
 from .smtp_delivery import send_via_smtp
+from .rate_limit import SlidingWindowRateLimiter
 from .webhooks import (
     create_webhook,
     ensure_default_webhook,
@@ -178,6 +185,88 @@ def create_admin_app() -> FastAPI:
     templates = Jinja2Templates(directory=templates_dir)
 
     app = FastAPI(title="MAIL_API Control Panel")
+
+    limiter = SlidingWindowRateLimiter(max_requests=240, window_seconds=60)
+
+    login_failures: dict[str, tuple[int, float]] = {}
+
+    def _csrf_token_for_request(request: Request) -> str:
+        s = get_csrf_serializer()
+        ip = _get_client_ip(request)
+        u = _get_current_user(request)
+        if u:
+            return s.dumps({"ip": ip, "u": u})
+        return s.dumps({"ip": ip})
+
+    def _is_csrf_valid(request: Request, token: str) -> bool:
+        token = (token or "").strip()
+        if not token:
+            return False
+
+        s = get_csrf_serializer()
+        try:
+            data = s.loads(token)
+        except (ValueError, TypeError):
+            return False
+
+        ip = _get_client_ip(request)
+        if str(data.get("ip", "")).strip() != ip:
+            return False
+
+        u = _get_current_user(request)
+        if u:
+            return str(data.get("u", "")).strip() == u
+
+        return "u" not in data
+
+    def _login_is_allowed(*, ip: str, username: str) -> tuple[bool, int]:
+        key = f"{ip}:{username.strip().lower()}"
+        entry = login_failures.get(key)
+        if entry is None:
+            return (True, 0)
+        _, until = entry
+        now = time.monotonic()
+        if now >= until:
+            return (True, 0)
+        return (False, int(max(1.0, until - now)))
+
+    def _record_login_failure(*, ip: str, username: str) -> None:
+        key = f"{ip}:{username.strip().lower()}"
+        attempts, until = login_failures.get(key, (0, 0.0))
+        attempts += 1
+        backoff = min(300.0, float(2 ** min(attempts, 8)))
+        login_failures[key] = (attempts, time.monotonic() + backoff)
+
+    def _clear_login_failures(*, ip: str, username: str) -> None:
+        key = f"{ip}:{username.strip().lower()}"
+        login_failures.pop(key, None)
+
+    @app.middleware("http")
+    async def _security_middleware(request: Request, call_next):
+        request.state.csrf_token = _csrf_token_for_request(request)
+
+        ip = _get_client_ip(request)
+        r = limiter.check(key=ip)
+        if not r.ok:
+            return PlainTextResponse(
+                content="rate limited",
+                status_code=429,
+                headers={"Retry-After": str(r.retry_after_seconds)},
+            )
+
+        if request.method.upper() == "POST":
+            try:
+                form = await request.form()
+            except Exception:
+                form = {}
+            token = str(form.get("csrf_token", ""))
+            if not _is_csrf_valid(request, token):
+                return PlainTextResponse(
+                    content="invalid csrf token",
+                    status_code=403,
+                )
+
+        return await call_next(request)
 
     @app.get("/healthz")
     async def healthz(request: Request):
@@ -737,17 +826,36 @@ def create_admin_app() -> FastAPI:
     async def queue_get(request: Request):
         _require_ip_allowed(request)
         u = _require_login(request)
+        qp = request.query_params
+        webhook_id_raw = (qp.get("webhook_id") or "").strip()
+        status_raw = (qp.get("status") or "").strip()
+        params: list[object] = []
+        where = []
+        if webhook_id_raw:
+            try:
+                wid = int(webhook_id_raw)
+                where.append("q.webhook_id = ?")
+                params.append(wid)
+            except ValueError:
+                pass
+        if status_raw:
+            where.append("q.status = ?")
+            params.append(status_raw)
+
+        where_sql = ""
+        if where:
+            where_sql = " where " + " and ".join(where)
+
+        sql = (
+            "select q.id, q.created_at, q.updated_at, q.status, "
+            "q.webhook_id, q.to_addr, q.from_addr, q.subject, "
+            "q.attempts, q.next_attempt_at, q.last_error "
+            "from outbound_queue q" + where_sql + " "
+            "order by q.next_attempt_at asc, q.id asc "
+            "limit 200"
+        )
         with get_conn() as conn:
-            rows = conn.execute(
-                (
-                    "select q.id, q.created_at, q.updated_at, q.status, "
-                    "q.webhook_id, q.to_addr, q.from_addr, q.subject, "
-                    "q.attempts, q.next_attempt_at, q.last_error "
-                    "from outbound_queue q "
-                    "order by q.next_attempt_at asc, q.id asc "
-                    "limit 200"
-                )
-            ).fetchall()
+            rows = conn.execute(sql, tuple(params)).fetchall()
         items = [dict(r) for r in rows]
         return templates.TemplateResponse(
             "queue.html",
@@ -756,7 +864,74 @@ def create_admin_app() -> FastAPI:
                 "user": u,
                 "prefix": _get_forwarded_prefix(request),
                 "items": items,
+                "filter_webhook_id": webhook_id_raw,
+                "filter_status": status_raw,
             },
+        )
+
+    @app.get("/queue/{queue_id}", response_class=HTMLResponse)
+    async def queue_detail(request: Request, queue_id: int):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        with get_conn() as conn:
+            row = conn.execute(
+                (
+                    "select id, created_at, updated_at, status, webhook_id, "
+                    "to_addr, from_addr, subject, body_text, attempts, "
+                    "next_attempt_at, last_error "
+                    "from outbound_queue where id = ?"
+                ),
+                (int(queue_id),),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="not found")
+        item = dict(row)
+        return templates.TemplateResponse(
+            "queue_detail.html",
+            {
+                "request": request,
+                "user": u,
+                "prefix": _get_forwarded_prefix(request),
+                "item": item,
+            },
+        )
+
+    @app.post("/queue/{queue_id}/retry")
+    async def queue_retry(request: Request, queue_id: int):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        now = _now_iso()
+        with get_conn() as conn:
+            conn.execute(
+                (
+                    "update outbound_queue "
+                    "set status = 'pending', updated_at = ?, "
+                    "next_attempt_at = ?, last_error = '' "
+                    "where id = ?"
+                ),
+                (now, now, int(queue_id)),
+            )
+            conn.commit()
+        _audit(u, "queue_retry", str(queue_id))
+        return RedirectResponse(
+            url=_prefixed(request, f"/queue/{queue_id}"),
+            status_code=302,
+        )
+
+    @app.post("/queue/{queue_id}/delete")
+    async def queue_delete(request: Request, queue_id: int):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        with get_conn() as conn:
+            conn.execute(
+                "delete from outbound_queue where id = ?",
+                (int(queue_id),),
+            )
+            conn.commit()
+        _audit(u, "queue_delete", str(queue_id))
+        return RedirectResponse(
+            url=_prefixed(request, "/queue"),
+            status_code=302,
         )
 
     def _smtp_values() -> dict[str, str]:
@@ -993,7 +1168,22 @@ def create_admin_app() -> FastAPI:
         password: str = Form(...),
     ):
         _require_ip_allowed(request)
+        ip = _get_client_ip(request)
+        allowed, wait_seconds = _login_is_allowed(ip=ip, username=username)
+        if not allowed:
+            return templates.TemplateResponse(
+                "login.html",
+                {
+                    "request": request,
+                    "error": f"too many attempts; retry in {wait_seconds}s",
+                    "has_admin": _has_any_admin(),
+                    "prefix": _get_forwarded_prefix(request),
+                },
+                status_code=429,
+            )
+
         if not _authenticate(username, password):
+            _record_login_failure(ip=ip, username=username)
             return templates.TemplateResponse(
                 "login.html",
                 {
@@ -1005,6 +1195,7 @@ def create_admin_app() -> FastAPI:
                 status_code=401,
             )
 
+        _clear_login_failures(ip=ip, username=username)
         s = get_session_serializer()
         cookie = s.dumps({"u": username})
         resp = RedirectResponse(url=_prefixed(request, "/"), status_code=302)

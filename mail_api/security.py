@@ -68,3 +68,10 @@ def get_session_serializer() -> URLSafeSerializer:
     if not secret:
         secret = get_or_create_session_secret()
     return URLSafeSerializer(secret, salt="mail_api_session")
+
+
+def get_csrf_serializer() -> URLSafeSerializer:
+    secret = os.environ.get("MAIL_API_SESSION_SECRET")
+    if not secret:
+        secret = get_or_create_session_secret()
+    return URLSafeSerializer(secret, salt="mail_api_csrf")

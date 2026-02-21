@@ -4,8 +4,10 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 
 from .ip_rules import ensure_default_rules, is_ip_allowed, list_rules
+from .rate_limit import SlidingWindowRateLimiter
 from .webhook_ip_rules import (
     has_any_rules as webhook_has_any_rules,
     is_ip_allowed as is_webhook_ip_allowed,
@@ -22,6 +24,20 @@ def create_receiver_app() -> FastAPI:
     ensure_default_rules()
     ensure_default_webhook()
     app = FastAPI(title="MAIL_API Receiver")
+
+    limiter = SlidingWindowRateLimiter(max_requests=120, window_seconds=60)
+
+    @app.middleware("http")
+    async def _rate_limit_middleware(request: Request, call_next):
+        ip = get_real_client_ip(request)
+        r = limiter.check(key=ip)
+        if not r.ok:
+            return PlainTextResponse(
+                content="rate limited",
+                status_code=429,
+                headers={"Retry-After": str(r.retry_after_seconds)},
+            )
+        return await call_next(request)
 
     @app.get("/healthz")
     async def healthz(request: Request):

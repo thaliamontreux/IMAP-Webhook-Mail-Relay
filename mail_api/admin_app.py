@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import io
 import os
+import secrets
 import sqlite3
 import time
 from typing import Any, Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import (
+    HTMLResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.templating import Jinja2Templates
 
 from .db import get_conn
@@ -48,6 +55,11 @@ from .webhook_ip_rules import (
     list_rules as list_webhook_ip_rules,
 )
 
+try:
+    import segno  # type: ignore
+except Exception:
+    segno = None
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -63,6 +75,91 @@ def _audit(actor: str, action: str, details: str) -> None:
             (actor, action, details, _now_iso()),
         )
         conn.commit()
+
+
+def _recovery_code_hash(*, username: str, code: str) -> str:
+    # Store a non-reversible hash for recovery codes.
+    # We use bcrypt for passwords, but recovery codes are intended to be fast
+    # to check and are already high-entropy.
+    from hashlib import sha256
+
+    u = (username or "").strip().lower()
+    c = (code or "").strip().replace("-", "").replace(" ", "").upper()
+    return sha256(f"{u}:{c}".encode("utf-8")).hexdigest()
+
+
+def _delete_all_recovery_codes(username: str) -> None:
+    u = (username or "").strip()
+    with get_conn() as conn:
+        conn.execute(
+            "delete from admin_recovery_codes where username = ?",
+            (u,),
+        )
+        conn.commit()
+
+
+def _count_unused_recovery_codes(username: str) -> int:
+    u = (username or "").strip()
+    with get_conn() as conn:
+        row = conn.execute(
+            (
+                "select count(*) as c from admin_recovery_codes "
+                "where username = ? and used_at is null"
+            ),
+            (u,),
+        ).fetchone()
+        return int(row["c"])
+
+
+def _create_recovery_codes(*, username: str, count: int = 10) -> list[str]:
+    # Human-friendly codes (no O/0, I/1) in 3 groups.
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+    u = (username or "").strip()
+    codes: list[str] = []
+    for _ in range(max(1, int(count))):
+        raw = "".join(secrets.choice(alphabet) for __ in range(12))
+        codes.append(f"{raw[0:4]}-{raw[4:8]}-{raw[8:12]}")
+
+    with get_conn() as conn:
+        conn.execute(
+            "delete from admin_recovery_codes where username = ?",
+            (u,),
+        )
+        for c in codes:
+            conn.execute(
+                (
+                    "insert into admin_recovery_codes("
+                    "username, code_hash, created_at, used_at"
+                    ") values(?, ?, ?, null)"
+                ),
+                (u, _recovery_code_hash(username=u, code=c), _now_iso()),
+            )
+        conn.commit()
+
+    return codes
+
+
+def _consume_recovery_code(*, username: str, code: str) -> bool:
+    u = (username or "").strip()
+    h = _recovery_code_hash(username=u, code=code)
+    now = _now_iso()
+    with get_conn() as conn:
+        row = conn.execute(
+            (
+                "select id from admin_recovery_codes "
+                "where username = ? and code_hash = ? and used_at is null"
+            ),
+            (u, h),
+        ).fetchone()
+        if row is None:
+            return False
+        conn.execute(
+            "update admin_recovery_codes set used_at = ? where id = ?",
+            (now, int(row["id"])),
+        )
+        conn.commit()
+        return True
 
 
 def _get_client_ip(request: Request) -> str:
@@ -348,10 +445,11 @@ def create_admin_app() -> FastAPI:
             )
 
         if request.method.upper() == "POST":
+            form: Any = {}
             try:
                 form = await request.form()
             except Exception:
-                form = {}
+                pass
             token = str(form.get("csrf_token", ""))
             if not _is_csrf_valid(request, token):
                 return PlainTextResponse(
@@ -1260,8 +1358,30 @@ def create_admin_app() -> FastAPI:
                 "totp_enabled": enabled,
                 "totp_secret": secret,
                 "otpauth_uri": uri,
+                "qr_available": segno is not None,
+                "recovery_unused": _count_unused_recovery_codes(u),
             },
         )
+
+    @app.get("/2fa/qr")
+    async def totp_qr(request: Request):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        _enabled, secret = _get_admin_totp(u)
+        if not secret:
+            raise HTTPException(status_code=404, detail="no totp secret")
+        if segno is None:
+            raise HTTPException(status_code=500, detail="qr not available")
+
+        uri = build_provisioning_uri(
+            secret=secret,
+            account=u,
+            issuer="MAIL_API",
+        )
+        qr = segno.make(uri)  # type: ignore[union-attr]
+        buf = io.BytesIO()
+        qr.save(buf, kind="svg", scale=6, border=2)  # type: ignore[union-attr]
+        return Response(content=buf.getvalue(), media_type="image/svg+xml")
 
     @app.post("/2fa/generate")
     async def totp_generate(request: Request):
@@ -1275,13 +1395,51 @@ def create_admin_app() -> FastAPI:
             status_code=302,
         )
 
+    @app.post("/2fa/recovery/generate", response_class=HTMLResponse)
+    async def recovery_generate(request: Request):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        enabled, secret = _get_admin_totp(u)
+        if not enabled or not secret:
+            raise HTTPException(status_code=400, detail="enable 2fa first")
+
+        new_codes = _create_recovery_codes(username=u, count=10)
+        _audit(u, "recovery_generate", "")
+
+        uri = build_provisioning_uri(
+            secret=secret,
+            account=u,
+            issuer="MAIL_API",
+        )
+        return templates.TemplateResponse(
+            "totp.html",
+            {
+                "request": request,
+                "user": u,
+                "prefix": _get_forwarded_prefix(request),
+                "totp_enabled": True,
+                "totp_secret": secret,
+                "otpauth_uri": uri,
+                "qr_available": segno is not None,
+                "recovery_unused": _count_unused_recovery_codes(u),
+                "new_recovery_codes": new_codes,
+                "message": (
+                    "recovery codes generated "
+                    "(store them now; they won't be shown again)"
+                ),
+            },
+        )
+
     @app.post("/2fa/enable", response_class=HTMLResponse)
     async def totp_enable(request: Request, code: str = Form("")):
         _require_ip_allowed(request)
         u = _require_login(request)
         enabled, secret = _get_admin_totp(u)
         if enabled:
-            return RedirectResponse(url=_prefixed(request, "/2fa"), status_code=302)
+            return RedirectResponse(
+                url=_prefixed(request, "/2fa"),
+                status_code=302,
+            )
         if not secret:
             return templates.TemplateResponse(
                 "totp.html",
@@ -1330,7 +1488,10 @@ def create_admin_app() -> FastAPI:
         u = _require_login(request)
         enabled, secret = _get_admin_totp(u)
         if not enabled:
-            return RedirectResponse(url=_prefixed(request, "/2fa"), status_code=302)
+            return RedirectResponse(
+                url=_prefixed(request, "/2fa"),
+                status_code=302,
+            )
         if not secret:
             raise HTTPException(status_code=400, detail="2fa misconfigured")
 
@@ -1355,6 +1516,7 @@ def create_admin_app() -> FastAPI:
             )
 
         _disable_admin_totp(u)
+        _delete_all_recovery_codes(u)
         _audit(u, "totp_disable", "")
         return RedirectResponse(
             url=_prefixed(request, "/2fa"),
@@ -1431,19 +1593,22 @@ def create_admin_app() -> FastAPI:
                     status_code=403,
                 )
             if not verify_totp(secret=secret, code=code):
-                _record_login_failure(ip=ip, username=username)
-                return templates.TemplateResponse(
-                    "login.html",
-                    {
-                        "request": request,
-                        "error": "invalid 2fa code",
-                        "has_admin": _has_any_admin(),
-                        "prefix": _get_forwarded_prefix(request),
-                        "username": username,
-                        "totp_required": True,
-                    },
-                    status_code=401,
-                )
+                if _consume_recovery_code(username=username, code=code):
+                    _audit(username, "recovery_consume", "")
+                else:
+                    _record_login_failure(ip=ip, username=username)
+                    return templates.TemplateResponse(
+                        "login.html",
+                        {
+                            "request": request,
+                            "error": "invalid 2fa code",
+                            "has_admin": _has_any_admin(),
+                            "prefix": _get_forwarded_prefix(request),
+                            "username": username,
+                            "totp_required": True,
+                        },
+                        status_code=401,
+                    )
 
         _clear_login_failures(ip=ip, username=username)
         s = get_session_serializer()

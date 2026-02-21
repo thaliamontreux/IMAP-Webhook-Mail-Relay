@@ -26,6 +26,35 @@
             2FA is currently <b>enabled</b> for <b>{{ user }}</b>.
           </div>
 
+          <div class="mb-3" style="color: var(--muted);">
+            Unused recovery codes: <b>{{ recovery_unused | default(0) }}</b>
+          </div>
+
+          <div class="mb-3">
+            <form method="post" action="{{ prefix }}/2fa/recovery/generate">
+              <div class="d-grid">
+                <button type="submit" class="btn btn-outline-light">
+                  <i class="fa-solid fa-key me-2"></i>
+                  Generate recovery codes
+                </button>
+              </div>
+            </form>
+            <div class="form-text" style="color: var(--muted);">
+              Recovery codes are one-time use. Generating new ones replaces any existing set.
+            </div>
+          </div>
+
+          {% if new_recovery_codes %}
+            <div class="mb-3">
+              <label class="form-label">New recovery codes</label>
+              <textarea class="form-control" rows="6" readonly>{% for c in new_recovery_codes %}{{ c }}
+{% endfor %}</textarea>
+              <div class="form-text" style="color: var(--muted);">
+                Save these now. They won't be shown again.
+              </div>
+            </div>
+          {% endif %}
+
           <form method="post" action="{{ prefix }}/2fa/disable">
             <div class="mb-3">
               <label class="form-label">Current 6-digit code</label>
@@ -48,6 +77,22 @@
               <label class="form-label">Secret (Base32)</label>
               <input class="form-control" value="{{ totp_secret }}" readonly />
             </div>
+
+            {% if qr_available %}
+              <div class="mb-3">
+                <label class="form-label">QR Code</label>
+                <div class="p-3" style="background: #fff; border-radius: 12px; display: inline-block;">
+                  <img
+                    src="{{ prefix }}/2fa/qr"
+                    alt="TOTP QR"
+                    style="width: 220px; height: 220px;"
+                  />
+                </div>
+                <div class="form-text" style="color: var(--muted);">
+                  Scan with Google Authenticator, 1Password, Authy, etc.
+                </div>
+              </div>
+            {% endif %}
 
             <div class="mb-3">
               <label class="form-label">otpauth:// URI</label>

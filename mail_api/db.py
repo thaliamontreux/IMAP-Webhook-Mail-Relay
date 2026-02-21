@@ -255,6 +255,24 @@ def init_db() -> None:
             )
             """
         )
+
+        conn.execute(
+            """
+            create table if not exists admin_recovery_codes (
+                id integer primary key autoincrement,
+                username text not null,
+                code_hash text not null,
+                created_at text not null,
+                used_at text
+            )
+            """
+        )
+        conn.execute(
+            (
+                "create index if not exists idx_admin_recovery_codes_user "
+                "on admin_recovery_codes(username)"
+            )
+        )
         conn.commit()
 
 

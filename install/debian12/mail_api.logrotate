@@ -1,0 +1,8 @@
+/var/lib/mail_api/delivery.log {
+  daily
+  rotate 14
+  compress
+  missingok
+  notifempty
+  copytruncate
+}

@@ -8,9 +8,17 @@ User=mail_api
 Group=mail_api
 WorkingDirectory=/opt/mail_api/app
 Environment=MAIL_API_DATA_DIR=/var/lib/mail_api
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/mail_api/venv/bin/python -m mail_api
 Restart=on-failure
 RestartSec=2
+
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mail_api
 
 [Install]
 WantedBy=multi-user.target

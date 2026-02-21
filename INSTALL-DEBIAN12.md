@@ -34,7 +34,7 @@ If you put Nginx in front, set the control panel setting:
 
 - `Trusted proxy CIDRs`: include the Nginx IP, e.g. `127.0.0.1/32`
 
-## Hardening checklist (no 2FA)
+## Hardening checklist
 
 - **Terminate TLS at Nginx**
   - Use the provided `nginx-example.conf` (TLS on port `2500`) as a starting point.
@@ -55,5 +55,20 @@ If you put Nginx in front, set the control panel setting:
 - **Persistent protections**
   - Rate limiting and login lockout are stored in SQLite (in `/var/lib/mail_api/mail_api.db` by default).
 
+- **2FA (TOTP + recovery codes)**
+  - After you bootstrap an admin account, sign in and visit **2FA** in the sidebar.
+  - Generate a secret and scan the QR code with an authenticator app.
+  - Enable 2FA by entering a valid 6-digit code.
+  - Generate recovery codes and store them securely. Recovery codes are one-time use.
+  - If you disable 2FA, existing recovery codes are deleted.
+
 - **Idempotency**
   - Clients may include `X-Idempotency-Key` (max 120 chars). Replays with the same key will return the same queue id.
+
+## Backups
+
+- The SQLite DB and `delivery.log` are stored in `MAIL_API_DATA_DIR`.
+  - Debian installer default: `/var/lib/mail_api/`
+- Recommended: take periodic copies of:
+  - `/var/lib/mail_api/mail_api.db`
+  - `/var/lib/mail_api/delivery.log`

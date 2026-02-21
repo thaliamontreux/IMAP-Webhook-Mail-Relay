@@ -8,6 +8,8 @@ VENV_DIR="$APP_DIR/venv"
 DATA_DIR="/var/lib/mail_api"
 SYSTEMD_UNIT_SRC="$(dirname "$0")/mail_api.service"
 SYSTEMD_UNIT_DST="/etc/systemd/system/mail_api.service"
+LOGROTATE_SRC="$(dirname "$0")/mail_api.logrotate"
+LOGROTATE_DST="/etc/logrotate.d/mail_api"
 
 WITH_NGINX="0"
 
@@ -95,6 +97,15 @@ cp -a "$SYSTEMD_UNIT_SRC" "$SYSTEMD_UNIT_DST"
 systemctl daemon-reload
 systemctl enable mail_api.service
 systemctl restart mail_api.service
+
+echo "==> Installing logrotate config"
+if [[ -f "$LOGROTATE_SRC" ]]; then
+  if [[ -e "$LOGROTATE_DST" ]]; then
+    echo "NOTE: $LOGROTATE_DST already exists. Not overwriting." >&2
+  else
+    cp -a "$LOGROTATE_SRC" "$LOGROTATE_DST"
+  fi
+fi
 
 if [[ "$WITH_NGINX" == "1" ]]; then
   echo "==> Installing Nginx site template"

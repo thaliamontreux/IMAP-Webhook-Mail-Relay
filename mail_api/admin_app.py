@@ -462,7 +462,42 @@ def create_admin_app() -> FastAPI:
     @app.get("/healthz")
     async def healthz(request: Request):
         _require_ip_allowed(request)
+        try:
+            with get_conn() as conn:
+                conn.execute("select 1").fetchone()
+        except Exception:
+            raise HTTPException(status_code=503, detail="db unavailable")
         return {"ok": True}
+
+    @app.get("/metrics", response_class=PlainTextResponse)
+    async def metrics(request: Request):
+        _require_ip_allowed(request)
+
+        lines: list[str] = [
+            "# TYPE mail_api_admin_up gauge",
+            "mail_api_admin_up 1",
+        ]
+
+        try:
+            with get_conn() as conn:
+                conn.execute("select 1").fetchone()
+            lines.append("mail_api_admin_db_up 1")
+        except Exception:
+            lines.append("mail_api_admin_db_up 0")
+            return "\n".join(lines) + "\n"
+
+        with get_conn() as conn:
+            rows = conn.execute(
+                "select status, count(*) as c from outbound_queue group by status"
+            ).fetchall()
+            for r in rows:
+                st = str(r["status"])
+                c = int(r["c"])
+                lines.append(
+                    f"mail_api_outbound_queue_total{{status=\"{st}\"}} {c}"
+                )
+
+        return "\n".join(lines) + "\n"
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):

@@ -6,6 +6,7 @@ from typing import Any, Optional
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
+from .db import get_conn
 from .ip_rules import ensure_default_rules, is_ip_allowed, list_rules
 from .rate_limit import SqliteFixedWindowRateLimiter
 from .webhook_ip_rules import (
@@ -91,7 +92,34 @@ def create_receiver_app() -> FastAPI:
         rules = list_rules()
         if not is_ip_allowed(client_ip, rules):
             raise HTTPException(status_code=403, detail="forbidden")
+
+        try:
+            with get_conn() as conn:
+                conn.execute("select 1").fetchone()
+        except Exception:
+            raise HTTPException(status_code=503, detail="db unavailable")
         return {"ok": True}
+
+    @app.get("/metrics", response_class=PlainTextResponse)
+    async def metrics(request: Request):
+        client_ip = get_real_client_ip(request)
+        rules = list_rules()
+        if not is_ip_allowed(client_ip, rules):
+            raise HTTPException(status_code=403, detail="forbidden")
+
+        lines: list[str] = [
+            "# TYPE mail_api_receiver_up gauge",
+            "mail_api_receiver_up 1",
+        ]
+
+        try:
+            with get_conn() as conn:
+                conn.execute("select 1").fetchone()
+            lines.append("mail_api_receiver_db_up 1")
+        except Exception:
+            lines.append("mail_api_receiver_db_up 0")
+
+        return "\n".join(lines) + "\n"
 
     @app.post("/webhook/outbound-email")
     async def outbound_email(

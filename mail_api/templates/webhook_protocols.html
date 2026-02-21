@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block page_title %}MAIL_API - Webhook Protocols{% endblock %}
+{% block header_title %}Webhook Protocols{% endblock %}
+
+{% block content %}
+  <div class="card-glass p-4">
+    <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
+      <div>
+        <h2 class="h5 mb-1">{{ webhook.name }} — Relay scenario</h2>
+        <div style="color: var(--muted);">
+          Active scenario:
+          <code style="color: rgba(255,255,255,0.82);">{{ webhook.relay_scenario or 'smtp' }}</code>
+          <span class="mx-2">|</span>
+          Relay key:
+          <code style="color: rgba(255,255,255,0.82);">{{ webhook.relay_key }}</code>
+        </div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-outline-light" href="{{ prefix }}/webhooks/{{ webhook.id }}">
+          <i class="fa-solid fa-arrow-left me-2"></i>
+          Back to webhook
+        </a>
+        <a class="btn btn-outline-light" href="{{ prefix }}/webhooks/{{ webhook.id }}/smtp">
+          <i class="fa-solid fa-paper-plane me-2"></i>
+          SMTP settings
+        </a>
+      </div>
+    </div>
+
+    <form class="mt-3" method="post" action="{{ prefix }}/webhooks/{{ webhook.id }}/protocols">
+      <div class="row g-3 align-items-end">
+        <div class="col-12 col-lg-6">
+          <label class="form-label">Relay scenario</label>
+          <select class="form-select" name="relay_scenario">
+            <option value="smtp" {% if (webhook.relay_scenario or 'smtp') == 'smtp' %}selected{% endif %}>
+              SMTP (push) — webhook calls MAIL_API, MAIL_API relays via SMTP
+            </option>
+            <option value="imap" {% if webhook.relay_scenario == 'imap' %}selected{% endif %}>
+              IMAP/IMAPS (pull) — MAIL_API reads mailbox and relays
+            </option>
+            <option value="pop3" {% if webhook.relay_scenario == 'pop3' %}selected{% endif %}>
+              POP3/POP3S (pull) — MAIL_API reads mailbox and relays
+            </option>
+          </select>
+        </div>
+        <div class="col-12 col-lg-6">
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary">
+              <i class="fa-solid fa-floppy-disk me-2"></i>
+              Save scenario
+            </button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  {% if (webhook.relay_scenario or 'smtp') == 'smtp' %}
+    <div class="card-glass p-4 mt-3">
+      <h2 class="h5 mb-2">SMTP relay (recommended)</h2>
+      <div style="color: var(--muted);">
+        For this scenario, your sender calls the receiver endpoint and MAIL_API delivers outbound mail using the SMTP settings configured for this webhook.
+      </div>
+      <div class="mt-3">
+        <a class="btn btn-outline-light" href="{{ prefix }}/webhooks/{{ webhook.id }}/smtp">
+          <i class="fa-solid fa-gear me-2"></i>
+          Configure SMTP
+        </a>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if webhook.relay_scenario == 'imap' %}
+    <div class="row g-3 mt-0">
+      <div class="col-12 col-xl-7">
+        <div class="card-glass p-4 mt-3">
+          <h2 class="h5 mb-3">IMAP / IMAPS settings</h2>
+          <form method="post" action="{{ prefix }}/webhooks/{{ webhook.id }}/imap">
+            <div class="mb-3">
+              <label class="form-label">IMAP Host</label>
+              <input class="form-control" name="imap_host" value="{{ webhook.imap_host }}" placeholder="imap.example.com" />
+            </div>
+
+            <div class="row g-3">
+              <div class="col-12 col-lg-6">
+                <label class="form-label">Port</label>
+                <input class="form-control" name="imap_port" value="{{ webhook.imap_port }}" placeholder="993" />
+              </div>
+              <div class="col-12 col-lg-6">
+                <label class="form-label">Security</label>
+                <select class="form-select" name="imap_security">
+                  <option value="ssl" {% if (webhook.imap_security or 'ssl') == 'ssl' %}selected{% endif %}>SSL (IMAPS)</option>
+                  <option value="starttls" {% if webhook.imap_security == 'starttls' %}selected{% endif %}>STARTTLS</option>
+                  <option value="plain" {% if webhook.imap_security == 'plain' %}selected{% endif %}>Plain</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="mb-3 mt-3">
+              <label class="form-label">Username</label>
+              <input class="form-control" name="imap_username" value="{{ webhook.imap_username }}" />
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Password (leave blank to keep existing)</label>
+              <input class="form-control" name="imap_password" type="password" value="" placeholder="••••••••••••" />
+            </div>
+
+            <div class="d-grid">
+              <button type="submit" class="btn btn-primary">
+                <i class="fa-solid fa-floppy-disk me-2"></i>
+                Save IMAP settings
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-5">
+        <div class="card-glass p-4 mt-3">
+          <h2 class="h5 mb-2">Test IMAP</h2>
+          <p class="mb-3" style="color: var(--muted);">Save settings first, then run a login/connect test.</p>
+
+          {% if test_result_imap %}
+            <div class="alert alert-info" role="alert">{{ test_result_imap }}</div>
+          {% endif %}
+
+          <form method="post" action="{{ prefix }}/webhooks/{{ webhook.id }}/imap/test">
+            <div class="d-grid">
+              <button type="submit" class="btn btn-outline-light">
+                <i class="fa-solid fa-plug-circle-check me-2"></i>
+                Test IMAP Connection
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if webhook.relay_scenario == 'pop3' %}
+    <div class="row g-3 mt-0">
+      <div class="col-12 col-xl-7">
+        <div class="card-glass p-4 mt-3">
+          <h2 class="h5 mb-3">POP3 / POP3S settings</h2>
+          <form method="post" action="{{ prefix }}/webhooks/{{ webhook.id }}/pop3">
+            <div class="mb-3">
+              <label class="form-label">POP3 Host</label>
+              <input class="form-control" name="pop3_host" value="{{ webhook.pop3_host }}" placeholder="pop.example.com" />
+            </div>
+
+            <div class="row g-3">
+              <div class="col-12 col-lg-6">
+                <label class="form-label">Port</label>
+                <input class="form-control" name="pop3_port" value="{{ webhook.pop3_port }}" placeholder="995" />
+              </div>
+              <div class="col-12 col-lg-6">
+                <label class="form-label">Security</label>
+                <select class="form-select" name="pop3_security">
+                  <option value="ssl" {% if (webhook.pop3_security or 'ssl') == 'ssl' %}selected{% endif %}>SSL (POP3S)</option>
+                  <option value="starttls" {% if webhook.pop3_security == 'starttls' %}selected{% endif %}>STARTTLS</option>
+                  <option value="plain" {% if webhook.pop3_security == 'plain' %}selected{% endif %}>Plain</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="mb-3 mt-3">
+              <label class="form-label">Username</label>
+              <input class="form-control" name="pop3_username" value="{{ webhook.pop3_username }}" />
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Password (leave blank to keep existing)</label>
+              <input class="form-control" name="pop3_password" type="password" value="" placeholder="••••••••••••" />
+            </div>
+
+            <div class="d-grid">
+              <button type="submit" class="btn btn-primary">
+                <i class="fa-solid fa-floppy-disk me-2"></i>
+                Save POP3 settings
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-5">
+        <div class="card-glass p-4 mt-3">
+          <h2 class="h5 mb-2">Test POP3</h2>
+          <p class="mb-3" style="color: var(--muted);">Save settings first, then run a login/connect test.</p>
+
+          {% if test_result_pop3 %}
+            <div class="alert alert-info" role="alert">{{ test_result_pop3 }}</div>
+          {% endif %}
+
+          <form method="post" action="{{ prefix }}/webhooks/{{ webhook.id }}/pop3/test">
+            <div class="d-grid">
+              <button type="submit" class="btn btn-outline-light">
+                <i class="fa-solid fa-plug-circle-check me-2"></i>
+                Test POP3 Connection
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}

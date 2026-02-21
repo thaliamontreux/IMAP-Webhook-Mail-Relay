@@ -38,9 +38,21 @@ def main() -> None:
     receiver_host = get_setting("receiver_bind_host").strip() or "0.0.0.0"
     admin_host = get_setting("admin_bind_host").strip() or "0.0.0.0"
 
-    p1 = multiprocessing.Process(target=_run_receiver, args=(receiver_host,), daemon=False)
-    p2 = multiprocessing.Process(target=_run_admin, args=(admin_host,), daemon=False)
-    p3 = multiprocessing.Process(target=_run_smtp_worker, args=(), daemon=False)
+    p1 = multiprocessing.Process(
+        target=_run_receiver,
+        args=(receiver_host,),
+        daemon=False,
+    )
+    p2 = multiprocessing.Process(
+        target=_run_admin,
+        args=(admin_host,),
+        daemon=False,
+    )
+    p3 = multiprocessing.Process(
+        target=_run_smtp_worker,
+        args=(),
+        daemon=False,
+    )
 
     p1.start()
     p2.start()

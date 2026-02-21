@@ -6,6 +6,11 @@ from typing import Any, Optional
 from fastapi import FastAPI, Header, HTTPException, Request
 
 from .ip_rules import ensure_default_rules, is_ip_allowed, list_rules
+from .webhook_ip_rules import (
+    has_any_rules as webhook_has_any_rules,
+    is_ip_allowed as is_webhook_ip_allowed,
+    list_rules as list_webhook_rules,
+)
 from .security import verify_webhook_signature
 from .emailer import build_message
 from .client_ip import get_real_client_ip
@@ -56,6 +61,11 @@ def create_receiver_app() -> FastAPI:
         if not wh.is_active:
             raise HTTPException(status_code=403, detail="webhook disabled")
 
+        if webhook_has_any_rules(webhook_id=wh.id):
+            wh_rules = list_webhook_rules(webhook_id=wh.id)
+            if not is_webhook_ip_allowed(client_ip, wh_rules):
+                raise HTTPException(status_code=403, detail="forbidden")
+
         raw_body = await request.body()
 
         if not wh.webhook_secret.strip():
@@ -101,7 +111,10 @@ def create_receiver_app() -> FastAPI:
 
         from_addr = (wh.sender_email or "").strip()
         if not from_addr or "@" not in from_addr:
-            raise HTTPException(status_code=503, detail="sender email not configured")
+            raise HTTPException(
+                status_code=503,
+                detail="sender email not configured",
+            )
 
         if wh.allow_from_override and from_localpart:
             domain = from_addr.split("@", 1)[1]

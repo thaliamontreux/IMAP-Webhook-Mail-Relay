@@ -10,7 +10,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .db import get_conn
-from .ip_rules import add_rule, delete_rule, ensure_default_rules, is_ip_allowed, list_rules
+from .ip_rules import (
+    add_rule,
+    delete_rule,
+    ensure_default_rules,
+    is_ip_allowed,
+    list_rules,
+)
 from .security import get_session_serializer, hash_password, verify_password
 from .settings import DEFAULTS, get_setting, set_setting
 from .client_ip import get_real_client_ip, is_trusted_proxy_peer
@@ -24,6 +30,14 @@ from .webhooks import (
     list_webhooks,
     update_webhook,
     update_webhook_smtp,
+    update_webhook_imap,
+    update_webhook_pop3,
+    update_webhook_relay_scenario,
+)
+from .webhook_ip_rules import (
+    add_rule as add_webhook_ip_rule,
+    delete_rule as delete_webhook_ip_rule,
+    list_rules as list_webhook_ip_rules,
 )
 
 
@@ -34,7 +48,10 @@ def _now_iso() -> str:
 def _audit(actor: str, action: str, details: str) -> None:
     with get_conn() as conn:
         conn.execute(
-            "insert into audit_log(actor, action, details, created_at) values(?, ?, ?, ?)",
+            (
+                "insert into audit_log(actor, action, details, created_at) "
+                "values(?, ?, ?, ?)"
+            ),
             (actor, action, details, _now_iso()),
         )
         conn.commit()
@@ -141,7 +158,10 @@ def _list_admins() -> list[dict]:
 def _authenticate(username: str, password: str) -> bool:
     with get_conn() as conn:
         row = conn.execute(
-            "select password_hash, is_active from admin_users where username = ?",
+            (
+                "select password_hash, is_active "
+                "from admin_users where username = ?"
+            ),
             (username,),
         ).fetchone()
         if row is None:
@@ -310,6 +330,7 @@ def create_admin_app() -> FastAPI:
         smtp_password: str = Form(""),
         smtp_ignore_certificates: str = Form(""),
         smtp_sender_name: str = Form(""),
+        smtp_envelope_from_override: str = Form(""),
         smtp_timeout_seconds: str = Form("15"),
     ):
         _require_ip_allowed(request)
@@ -336,6 +357,7 @@ def create_admin_app() -> FastAPI:
             smtp_timeout_seconds=smtp_timeout_seconds,
             smtp_ignore_certificates=ignore_value,
             smtp_sender_name=smtp_sender_name,
+            smtp_envelope_from_override=smtp_envelope_from_override,
         )
         _audit(u, "update_webhook_smtp", f"id={webhook_id};port={port}")
         return RedirectResponse(
@@ -378,6 +400,10 @@ def create_admin_app() -> FastAPI:
                 detail="sender email not configured",
             )
 
+        envelope_from = from_addr
+        if wh.smtp_envelope_from_override.strip():
+            envelope_from = wh.smtp_envelope_from_override.strip()
+
         sender_name = wh.smtp_sender_name.strip() or None
         msg = build_message(
             from_addr=from_addr,
@@ -391,7 +417,7 @@ def create_admin_app() -> FastAPI:
         err = ""
         try:
             send_via_smtp(
-                envelope_from=from_addr,
+                envelope_from=envelope_from,
                 to_addr=test_to.strip(),
                 message_bytes=msg,
                 smtp_settings={
@@ -446,6 +472,290 @@ def create_admin_app() -> FastAPI:
                 "preset_port": port,
                 "preset_label": preset_label,
                 "test_result": result,
+            },
+        )
+
+    @app.get("/webhooks/{webhook_id}/protocols", response_class=HTMLResponse)
+    async def webhook_protocols_get(request: Request, webhook_id: int):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        wh = get_webhook_by_id(webhook_id)
+        if wh is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return templates.TemplateResponse(
+            "webhook_protocols.html",
+            {
+                "request": request,
+                "user": u,
+                "prefix": _get_forwarded_prefix(request),
+                "webhook": wh,
+            },
+        )
+
+    @app.post("/webhooks/{webhook_id}/protocols")
+    async def webhook_protocols_post(
+        request: Request,
+        webhook_id: int,
+        relay_scenario: str = Form("smtp"),
+    ):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        wh = get_webhook_by_id(webhook_id)
+        if wh is None:
+            raise HTTPException(status_code=404, detail="not found")
+        update_webhook_relay_scenario(
+            webhook_id=webhook_id,
+            relay_scenario=relay_scenario,
+        )
+        _audit(
+            u,
+            "update_webhook_protocols",
+            f"id={webhook_id};sc={relay_scenario}",
+        )
+        return RedirectResponse(
+            url=_prefixed(request, f"/webhooks/{webhook_id}/protocols"),
+            status_code=302,
+        )
+
+    @app.post("/webhooks/{webhook_id}/imap")
+    async def webhook_imap_post(
+        request: Request,
+        webhook_id: int,
+        imap_host: str = Form(""),
+        imap_port: str = Form("993"),
+        imap_security: str = Form("ssl"),
+        imap_username: str = Form(""),
+        imap_password: str = Form(""),
+    ):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        wh = get_webhook_by_id(webhook_id)
+        if wh is None:
+            raise HTTPException(status_code=404, detail="not found")
+        update_webhook_imap(
+            webhook_id=webhook_id,
+            imap_host=imap_host,
+            imap_port=imap_port,
+            imap_security=imap_security,
+            imap_username=imap_username,
+            imap_password=imap_password,
+        )
+        _audit(u, "update_webhook_imap", f"id={webhook_id}")
+        return RedirectResponse(
+            url=_prefixed(request, f"/webhooks/{webhook_id}/protocols"),
+            status_code=302,
+        )
+
+    @app.post("/webhooks/{webhook_id}/imap/test", response_class=HTMLResponse)
+    async def webhook_imap_test(request: Request, webhook_id: int):
+        import imaplib
+
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        wh = get_webhook_by_id(webhook_id)
+        if wh is None:
+            raise HTTPException(status_code=404, detail="not found")
+
+        result = "IMAP test failed"
+        try:
+            port = int((wh.imap_port or "").strip() or "993")
+        except ValueError:
+            port = 993
+
+        try:
+            if (wh.imap_security or "ssl") == "ssl":
+                c = imaplib.IMAP4_SSL(host=wh.imap_host, port=port)
+            else:
+                c = imaplib.IMAP4(host=wh.imap_host, port=port)
+                if (wh.imap_security or "").strip().lower() == "starttls":
+                    c.starttls()
+
+            typ, _ = c.login(wh.imap_username, wh.imap_password)
+            c.logout()
+            result = f"IMAP test succeeded ({typ})"
+        except Exception as e:
+            result = f"IMAP test failed: {e}"
+
+        wh = get_webhook_by_id(webhook_id)
+        return templates.TemplateResponse(
+            "webhook_protocols.html",
+            {
+                "request": request,
+                "user": u,
+                "prefix": _get_forwarded_prefix(request),
+                "webhook": wh,
+                "test_result_imap": result,
+            },
+        )
+
+    @app.post("/webhooks/{webhook_id}/pop3")
+    async def webhook_pop3_post(
+        request: Request,
+        webhook_id: int,
+        pop3_host: str = Form(""),
+        pop3_port: str = Form("995"),
+        pop3_security: str = Form("ssl"),
+        pop3_username: str = Form(""),
+        pop3_password: str = Form(""),
+    ):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        wh = get_webhook_by_id(webhook_id)
+        if wh is None:
+            raise HTTPException(status_code=404, detail="not found")
+        update_webhook_pop3(
+            webhook_id=webhook_id,
+            pop3_host=pop3_host,
+            pop3_port=pop3_port,
+            pop3_security=pop3_security,
+            pop3_username=pop3_username,
+            pop3_password=pop3_password,
+        )
+        _audit(u, "update_webhook_pop3", f"id={webhook_id}")
+        return RedirectResponse(
+            url=_prefixed(request, f"/webhooks/{webhook_id}/protocols"),
+            status_code=302,
+        )
+
+    @app.post("/webhooks/{webhook_id}/pop3/test", response_class=HTMLResponse)
+    async def webhook_pop3_test(request: Request, webhook_id: int):
+        import poplib
+
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        wh = get_webhook_by_id(webhook_id)
+        if wh is None:
+            raise HTTPException(status_code=404, detail="not found")
+
+        result = "POP3 test failed"
+        try:
+            port = int((wh.pop3_port or "").strip() or "995")
+        except ValueError:
+            port = 995
+
+        try:
+            if (wh.pop3_security or "ssl") == "ssl":
+                c = poplib.POP3_SSL(
+                    host=wh.pop3_host,
+                    port=port,
+                    timeout=10,
+                )
+            else:
+                c = poplib.POP3(
+                    host=wh.pop3_host,
+                    port=port,
+                    timeout=10,
+                )
+                if (wh.pop3_security or "").strip().lower() == "starttls":
+                    c.stls()
+            c.user(wh.pop3_username)
+            c.pass_(wh.pop3_password)
+            c.quit()
+            result = "POP3 test succeeded"
+        except Exception as e:
+            result = f"POP3 test failed: {e}"
+
+        wh = get_webhook_by_id(webhook_id)
+        return templates.TemplateResponse(
+            "webhook_protocols.html",
+            {
+                "request": request,
+                "user": u,
+                "prefix": _get_forwarded_prefix(request),
+                "webhook": wh,
+                "test_result_pop3": result,
+            },
+        )
+
+    @app.get("/webhooks/{webhook_id}/ip-rules", response_class=HTMLResponse)
+    async def webhook_ip_rules_get(request: Request, webhook_id: int):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        wh = get_webhook_by_id(webhook_id)
+        if wh is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return templates.TemplateResponse(
+            "webhook_ip_rules.html",
+            {
+                "request": request,
+                "user": u,
+                "prefix": _get_forwarded_prefix(request),
+                "webhook": wh,
+                "rules": list_webhook_ip_rules(webhook_id=webhook_id),
+            },
+        )
+
+    @app.post("/webhooks/{webhook_id}/ip-rules/add")
+    async def webhook_ip_rules_add(
+        request: Request,
+        webhook_id: int,
+        action: str = Form("deny"),
+        cidr: str = Form(""),
+    ):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        wh = get_webhook_by_id(webhook_id)
+        if wh is None:
+            raise HTTPException(status_code=404, detail="not found")
+        try:
+            add_webhook_ip_rule(
+                webhook_id=webhook_id,
+                action=action,
+                cidr=cidr,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        _audit(
+            u,
+            "add_webhook_ip_rule",
+            f"id={webhook_id};{action};{cidr}",
+        )
+        return RedirectResponse(
+            url=_prefixed(request, f"/webhooks/{webhook_id}/ip-rules"),
+            status_code=302,
+        )
+
+    @app.post("/webhooks/{webhook_id}/ip-rules/delete")
+    async def webhook_ip_rules_delete(
+        request: Request,
+        webhook_id: int,
+        rule_id: int = Form(0),
+    ):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        wh = get_webhook_by_id(webhook_id)
+        if wh is None:
+            raise HTTPException(status_code=404, detail="not found")
+        delete_webhook_ip_rule(rule_id=int(rule_id))
+        _audit(u, "delete_webhook_ip_rule", f"id={webhook_id};rule={rule_id}")
+        return RedirectResponse(
+            url=_prefixed(request, f"/webhooks/{webhook_id}/ip-rules"),
+            status_code=302,
+        )
+
+    @app.get("/queue", response_class=HTMLResponse)
+    async def queue_get(request: Request):
+        _require_ip_allowed(request)
+        u = _require_login(request)
+        with get_conn() as conn:
+            rows = conn.execute(
+                (
+                    "select q.id, q.created_at, q.updated_at, q.status, "
+                    "q.webhook_id, q.to_addr, q.from_addr, q.subject, "
+                    "q.attempts, q.next_attempt_at, q.last_error "
+                    "from outbound_queue q "
+                    "order by q.next_attempt_at asc, q.id asc "
+                    "limit 200"
+                )
+            ).fetchall()
+        items = [dict(r) for r in rows]
+        return templates.TemplateResponse(
+            "queue.html",
+            {
+                "request": request,
+                "user": u,
+                "prefix": _get_forwarded_prefix(request),
+                "items": items,
             },
         )
 
@@ -541,7 +851,11 @@ def create_admin_app() -> FastAPI:
         if smtp_password.strip():
             set_setting("smtp_password", smtp_password)
 
-        _audit(u, "update_smtp", f"port={port};security={security}")
+        _audit(
+            u,
+            "update_smtp",
+            f"port={port};security={security}",
+        )
         return RedirectResponse(
             url=_prefixed(request, f"/smtp/{port}"),
             status_code=302,
@@ -586,7 +900,9 @@ def create_admin_app() -> FastAPI:
             from_addr=from_addr,
             to_addr=test_to.strip(),
             subject="MAIL_API SMTP Test",
-            body_text="This is a test message from MAIL_API.\n",
+            body_text=(
+                "This is a test message from MAIL_API.\n"
+            ),
             from_name=sender_name,
         )
 
@@ -614,7 +930,8 @@ def create_admin_app() -> FastAPI:
             result = "SMTP test succeeded"
         else:
             append_log_line(
-                f"TEST FAIL to={test_to.strip()} port={port} sec={security} err={err}"
+                f"TEST FAIL to={test_to.strip()} port={port} sec={security} "
+                f"err={err}"
             )
             _audit(
                 u,
@@ -802,7 +1119,10 @@ def create_admin_app() -> FastAPI:
         u = _require_login(request)
 
         set_setting("webhook_secret", webhook_secret.strip())
-        set_setting("timestamp_skew_seconds", timestamp_skew_seconds.strip() or "300")
+        set_setting(
+            "timestamp_skew_seconds",
+            timestamp_skew_seconds.strip() or "300",
+        )
         set_setting(
             "allowed_sender_domain",
             allowed_sender_domain.strip(),
@@ -819,7 +1139,10 @@ def create_admin_app() -> FastAPI:
             else "0"
         )
         set_setting("allow_from_override", allow_override)
-        set_setting("sendmail_path", sendmail_path.strip() or "/usr/sbin/sendmail")
+        set_setting(
+            "sendmail_path",
+            sendmail_path.strip() or "/usr/sbin/sendmail",
+        )
         set_setting(
             "receiver_bind_host",
             receiver_bind_host.strip() or "0.0.0.0",
@@ -831,7 +1154,10 @@ def create_admin_app() -> FastAPI:
         set_setting("trusted_proxy_cidrs", trusted_proxy_cidrs.strip())
 
         _audit(u, "update_settings", "")
-        return RedirectResponse(url=_prefixed(request, "/settings"), status_code=302)
+        return RedirectResponse(
+            url=_prefixed(request, "/settings"),
+            status_code=302,
+        )
 
     @app.get("/ip-rules", response_class=HTMLResponse)
     async def ip_rules_get(request: Request):
@@ -870,13 +1196,22 @@ def create_admin_app() -> FastAPI:
         _require_ip_allowed(request)
         u = _require_login(request)
         if len(username.strip()) < 3 or len(password) < 10:
-            return RedirectResponse(url=_prefixed(request, "/admins"), status_code=302)
+            return RedirectResponse(
+                url=_prefixed(request, "/admins"),
+                status_code=302,
+            )
         try:
             _create_admin(username.strip(), password)
         except sqlite3.IntegrityError:
-            return RedirectResponse(url=_prefixed(request, "/admins"), status_code=302)
+            return RedirectResponse(
+                url=_prefixed(request, "/admins"),
+                status_code=302,
+            )
         _audit(u, "create_admin", username.strip())
-        return RedirectResponse(url=_prefixed(request, "/admins"), status_code=302)
+        return RedirectResponse(
+            url=_prefixed(request, "/admins"),
+            status_code=302,
+        )
 
     @app.post("/admins/disable")
     async def admins_disable(request: Request, username: str = Form(...)):
@@ -884,7 +1219,10 @@ def create_admin_app() -> FastAPI:
         u = _require_login(request)
         _set_admin_active(username.strip(), False)
         _audit(u, "disable_admin", username.strip())
-        return RedirectResponse(url=_prefixed(request, "/admins"), status_code=302)
+        return RedirectResponse(
+            url=_prefixed(request, "/admins"),
+            status_code=302,
+        )
 
     @app.post("/admins/enable")
     async def admins_enable(request: Request, username: str = Form(...)):
@@ -892,7 +1230,10 @@ def create_admin_app() -> FastAPI:
         u = _require_login(request)
         _set_admin_active(username.strip(), True)
         _audit(u, "enable_admin", username.strip())
-        return RedirectResponse(url=_prefixed(request, "/admins"), status_code=302)
+        return RedirectResponse(
+            url=_prefixed(request, "/admins"),
+            status_code=302,
+        )
 
     @app.post("/ip-rules/add")
     async def ip_rules_add(
@@ -905,9 +1246,15 @@ def create_admin_app() -> FastAPI:
         try:
             add_rule(action, cidr)
         except ValueError:
-            return RedirectResponse(url=_prefixed(request, "/ip-rules"), status_code=302)
+            return RedirectResponse(
+                url=_prefixed(request, "/ip-rules"),
+                status_code=302,
+            )
         _audit(u, "add_ip_rule", f"{action}:{cidr}")
-        return RedirectResponse(url=_prefixed(request, "/ip-rules"), status_code=302)
+        return RedirectResponse(
+            url=_prefixed(request, "/ip-rules"),
+            status_code=302,
+        )
 
     @app.post("/ip-rules/delete")
     async def ip_rules_delete(request: Request, rule_id: int = Form(...)):
@@ -915,6 +1262,9 @@ def create_admin_app() -> FastAPI:
         u = _require_login(request)
         delete_rule(rule_id)
         _audit(u, "delete_ip_rule", str(rule_id))
-        return RedirectResponse(url=_prefixed(request, "/ip-rules"), status_code=302)
+        return RedirectResponse(
+            url=_prefixed(request, "/ip-rules"),
+            status_code=302,
+        )
 
     return app

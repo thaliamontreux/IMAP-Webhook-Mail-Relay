@@ -36,10 +36,8 @@ def send_via_smtp(
     except ValueError:
         raise RuntimeError("invalid smtp port")
 
-    security = (
-        (s.get("smtp_security") or get_setting("smtp_security")).strip().lower()
-        or "starttls"
-    )
+    security_setting = s.get("smtp_security") or get_setting("smtp_security")
+    security = (security_setting.strip().lower() or "starttls")
     timeout_raw = (
         (s.get("smtp_timeout_seconds") or get_setting("smtp_timeout_seconds"))
         .strip()

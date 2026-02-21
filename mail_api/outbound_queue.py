@@ -60,12 +60,16 @@ def enqueue_email(
         return int(cur.lastrowid)
 
 
-def reserve_next_email(*, now: Optional[datetime] = None) -> Optional[QueuedEmail]:
+def reserve_next_email(
+    *,
+    now: Optional[datetime] = None,
+) -> Optional[QueuedEmail]:
     now_dt = now or _now()
     now_iso = now_dt.isoformat()
     stale_iso = (now_dt - timedelta(minutes=5)).isoformat()
 
-    # Best-effort single-worker reservation. BEGIN IMMEDIATE prevents two workers
+    # Best-effort single-worker reservation. BEGIN IMMEDIATE prevents two
+    # workers
     # from reserving the same row.
     with get_conn() as conn:
         conn.execute("begin immediate")
@@ -136,5 +140,8 @@ def mark_failed(*, queue_id: int, previous_attempts: int, error: str) -> None:
 
 def delete_email(*, queue_id: int) -> None:
     with get_conn() as conn:
-        conn.execute("delete from outbound_queue where id = ?", (int(queue_id),))
+        conn.execute(
+            "delete from outbound_queue where id = ?",
+            (int(queue_id),),
+        )
         conn.commit()

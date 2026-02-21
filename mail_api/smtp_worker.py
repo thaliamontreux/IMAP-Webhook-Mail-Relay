@@ -41,9 +41,13 @@ def run_smtp_worker(*, poll_seconds: float = 2.0) -> None:
             time.sleep(0.2)
             continue
 
+        envelope_from = q.from_addr
+        if wh.smtp_envelope_from_override.strip():
+            envelope_from = wh.smtp_envelope_from_override.strip()
+
         try:
             send_via_smtp(
-                envelope_from=q.from_addr,
+                envelope_from=envelope_from,
                 to_addr=q.to_addr,
                 message_bytes=q.message_bytes,
                 smtp_settings={

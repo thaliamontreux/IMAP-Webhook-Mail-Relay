@@ -26,7 +26,12 @@ def build_message(
     return msg.as_bytes()
 
 
-def send_via_sendmail(*, sendmail_path: str, envelope_from: str, message_bytes: bytes) -> None:
+def send_via_sendmail(
+    *,
+    sendmail_path: str,
+    envelope_from: str,
+    message_bytes: bytes,
+) -> None:
     p = subprocess.run(
         [sendmail_path, "-t", "-i", "-f", envelope_from],
         input=message_bytes,
@@ -35,4 +40,5 @@ def send_via_sendmail(*, sendmail_path: str, envelope_from: str, message_bytes: 
         check=False,
     )
     if p.returncode != 0:
-        raise RuntimeError(p.stderr.decode("utf-8", errors="replace").strip() or "sendmail failed")
+        err = p.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(err or "sendmail failed")

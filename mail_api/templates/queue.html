@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block page_title %}MAIL_API - Queue{% endblock %}
+{% block header_title %}Queue{% endblock %}
+
+{% block content %}
+  <div class="card-glass p-4">
+    <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
+      <div>
+        <h2 class="h5 mb-1">Outbound queue</h2>
+        <div style="color: var(--muted);">Most recent 200 items (oldest next-at first).</div>
+      </div>
+    </div>
+
+    <div class="table-responsive mt-3">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Status</th>
+            <th>Webhook</th>
+            <th>To</th>
+            <th>From</th>
+            <th>Subject</th>
+            <th>Attempts</th>
+            <th>Next attempt</th>
+            <th>Last error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for it in items %}
+            <tr>
+              <td>{{ it.id }}</td>
+              <td><code style="color: rgba(255,255,255,0.82);">{{ it.status }}</code></td>
+              <td>
+                <a class="btn btn-sm btn-outline-light" href="{{ prefix }}/webhooks/{{ it.webhook_id }}">
+                  <i class="fa-solid fa-link me-1"></i>
+                  {{ it.webhook_id }}
+                </a>
+              </td>
+              <td><code style="color: rgba(255,255,255,0.82);">{{ it.to_addr }}</code></td>
+              <td><code style="color: rgba(255,255,255,0.82);">{{ it.from_addr }}</code></td>
+              <td style="max-width: 340px;">
+                <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  {{ it.subject }}
+                </div>
+              </td>
+              <td>{{ it.attempts }}</td>
+              <td style="color: var(--muted);">{{ it.next_attempt_at }}</td>
+              <td style="max-width: 420px; color: var(--muted);">
+                <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  {{ it.last_error }}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

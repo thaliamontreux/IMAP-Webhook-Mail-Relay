@@ -336,6 +336,13 @@
               Webhooks
             </a>
             <a
+              class="side-link {% if path.startswith('/queue') %}active{% endif %}"
+              href="{{ prefix }}/queue"
+            >
+              <i class="fa-solid fa-layer-group"></i>
+              Queue
+            </a>
+            <a
               class="side-link {% if path.startswith('/settings') %}active{% endif %}"
               href="{{ prefix }}/settings"
             >

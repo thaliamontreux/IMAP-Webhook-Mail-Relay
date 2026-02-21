@@ -41,11 +41,90 @@ def init_db() -> None:
                 smtp_timeout_seconds text not null default '15',
                 smtp_ignore_certificates text not null default '0',
                 smtp_sender_name text not null default '',
+                smtp_envelope_from_override text not null default '',
+                relay_scenario text not null default 'smtp',
+                imap_host text not null default '',
+                imap_port text not null default '993',
+                imap_security text not null default 'ssl',
+                imap_username text not null default '',
+                imap_password text not null default '',
+                pop3_host text not null default '',
+                pop3_port text not null default '995',
+                pop3_security text not null default 'ssl',
+                pop3_username text not null default '',
+                pop3_password text not null default '',
                 created_at text not null,
                 updated_at text not null
             )
             """
         )
+
+        webhook_cols = {
+            str(r["name"])
+            for r in conn.execute(
+                "pragma table_info(webhooks)"
+            ).fetchall()
+        }
+        if "smtp_envelope_from_override" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "smtp_envelope_from_override text not null default ''"
+            )
+        if "relay_scenario" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "relay_scenario text not null default 'smtp'"
+            )
+        if "imap_host" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "imap_host text not null default ''"
+            )
+        if "imap_port" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "imap_port text not null default '993'"
+            )
+        if "imap_security" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "imap_security text not null default 'ssl'"
+            )
+        if "imap_username" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "imap_username text not null default ''"
+            )
+        if "imap_password" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "imap_password text not null default ''"
+            )
+        if "pop3_host" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "pop3_host text not null default ''"
+            )
+        if "pop3_port" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "pop3_port text not null default '995'"
+            )
+        if "pop3_security" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "pop3_security text not null default 'ssl'"
+            )
+        if "pop3_username" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "pop3_username text not null default ''"
+            )
+        if "pop3_password" not in webhook_cols:
+            conn.execute(
+                "alter table webhooks add column "
+                "pop3_password text not null default ''"
+            )
         conn.execute(
             """
             create table if not exists outbound_queue (
@@ -92,6 +171,17 @@ def init_db() -> None:
             """
             create table if not exists ip_rules (
                 id integer primary key autoincrement,
+                action text not null,
+                cidr text not null,
+                created_at text not null
+            )
+            """
+        )
+        conn.execute(
+            """
+            create table if not exists webhook_ip_rules (
+                id integer primary key autoincrement,
+                webhook_id integer not null,
                 action text not null,
                 cidr text not null,
                 created_at text not null

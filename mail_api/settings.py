@@ -41,7 +41,10 @@ DEFAULTS = {
 
 def get_setting(key: str) -> str:
     with get_conn() as conn:
-        row = conn.execute("select value from settings where key = ?", (key,)).fetchone()
+        row = conn.execute(
+            "select value from settings where key = ?",
+            (key,),
+        ).fetchone()
         if row is None:
             return DEFAULTS.get(key, "")
         return str(row["value"])
@@ -50,7 +53,10 @@ def get_setting(key: str) -> str:
 def set_setting(key: str, value: str) -> None:
     with get_conn() as conn:
         conn.execute(
-            "insert into settings(key, value) values(?, ?) on conflict(key) do update set value = excluded.value",
+            (
+                "insert into settings(key, value) values(?, ?) "
+                "on conflict(key) do update set value = excluded.value"
+            ),
             (key, value),
         )
         conn.commit()
@@ -87,7 +93,11 @@ def load_app_settings() -> AppSettings:
         webhook_secret=secret,
         timestamp_skew_seconds=skew,
         allowed_sender_domain=get_setting("allowed_sender_domain").strip(),
-        default_from_localpart=get_setting("default_from_localpart").strip() or "no-reply",
+        default_from_localpart=(
+            get_setting("default_from_localpart").strip() or "no-reply"
+        ),
         allow_from_override=allow_override,
-        sendmail_path=get_setting("sendmail_path").strip() or "/usr/sbin/sendmail",
+        sendmail_path=(
+            get_setting("sendmail_path").strip() or "/usr/sbin/sendmail"
+        ),
     )

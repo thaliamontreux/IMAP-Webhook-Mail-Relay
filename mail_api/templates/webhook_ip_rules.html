@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block page_title %}MAIL_API - Webhook IP Rules{% endblock %}
+{% block header_title %}Webhook IP Rules{% endblock %}
+
+{% block content %}
+  <div class="row g-3">
+    <div class="col-12 col-xl-8">
+      <div class="card-glass p-4">
+        <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
+          <div>
+            <h2 class="h5 mb-1">{{ webhook.name }} — Allow / deny rules</h2>
+            <div style="color: var(--muted);">
+              Deny rules apply first, then allow. If no allow rule matches, access is denied.
+            </div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-outline-light" href="{{ prefix }}/webhooks/{{ webhook.id }}">
+              <i class="fa-solid fa-arrow-left me-2"></i>
+              Back to webhook
+            </a>
+            <a class="btn btn-outline-light" href="{{ prefix }}/webhooks/{{ webhook.id }}/protocols">
+              <i class="fa-solid fa-diagram-project me-2"></i>
+              Protocols
+            </a>
+          </div>
+        </div>
+
+        <div class="table-responsive mt-3">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Action</th>
+                <th>CIDR</th>
+                <th>Created</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in rules %}
+                <tr>
+                  <td>{{ r.id }}</td>
+                  <td>
+                    {% if r.action == 'deny' %}
+                      <span class="badge text-bg-danger">deny</span>
+                    {% else %}
+                      <span class="badge text-bg-success">allow</span>
+                    {% endif %}
+                  </td>
+                  <td><code style="color: rgba(255,255,255,0.82);">{{ r.cidr }}</code></td>
+                  <td style="color: var(--muted);">{{ r.created_at }}</td>
+                  <td class="text-end">
+                    <form method="post" action="{{ prefix }}/webhooks/{{ webhook.id }}/ip-rules/delete" class="m-0">
+                      <input type="hidden" name="rule_id" value="{{ r.id }}" />
+                      <button type="submit" class="btn btn-sm btn-outline-light">
+                        <i class="fa-solid fa-trash me-1"></i>
+                        Delete
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-xl-4">
+      <div class="card-glass p-4">
+        <h2 class="h5 mb-3">Add rule</h2>
+
+        <form method="post" action="{{ prefix }}/webhooks/{{ webhook.id }}/ip-rules/add">
+          <div class="mb-3">
+            <label class="form-label">Action</label>
+            <select class="form-select" name="action">
+              <option value="deny">deny</option>
+              <option value="allow">allow</option>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">CIDR</label>
+            <input class="form-control" name="cidr" placeholder="192.168.250.0/24" />
+          </div>
+
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary">
+              <i class="fa-solid fa-plus me-2"></i>
+              Add rule
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card-glass p-4 mt-3">
+        <h2 class="h6 mb-2" style="color: var(--muted);">Notes</h2>
+        <div style="color: var(--muted);">
+          If you add per-webhook rules, they apply in addition to the global IP Rules.
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

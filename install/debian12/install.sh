@@ -34,17 +34,28 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-echo "==> Installing apt dependencies"
-apt-get update
-apt-get install -y --no-install-recommends \
-  python3 \
-  python3-venv \
-  python3-pip \
-  ca-certificates \
-  build-essential \
-  python3-dev \
-  libffi-dev \
-  libssl-dev
+echo "==> Checking prerequisites"
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 not found. Install Python 3.11+ first." >&2
+  exit 1
+fi
+
+if ! python3 -m venv --help >/dev/null 2>&1; then
+  echo "ERROR: python3 venv module not available. Install python3-venv." >&2
+  exit 1
+fi
+
+if ! command -v systemctl >/dev/null 2>&1; then
+  echo "ERROR: systemctl not found. This installer requires systemd." >&2
+  exit 1
+fi
+
+if [[ "$WITH_NGINX" == "1" ]]; then
+  if ! command -v nginx >/dev/null 2>&1; then
+    echo "ERROR: nginx not found but --nginx was provided." >&2
+    exit 1
+  fi
+fi
 
 if ! command -v /usr/sbin/sendmail >/dev/null 2>&1; then
   echo "WARNING: /usr/sbin/sendmail not found. Install/configure postfix on this host." >&2

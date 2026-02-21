@@ -10,7 +10,7 @@ Run as root (or with sudo):
 
 ## What the installer does
 
-- Installs required apt packages (Python venv tooling + build tools)
+- Verifies prerequisites exist (python3 + venv + systemd; nginx only if you pass `--nginx`)
 - Creates a dedicated system user `mail_api`
 - Copies the app into `/opt/mail_api/app`
 - Creates a virtual environment in `/opt/mail_api/venv` and installs `requirements.txt`

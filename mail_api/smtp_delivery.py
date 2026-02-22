@@ -25,42 +25,52 @@ def send_via_smtp(
     smtp_settings: dict[str, str] | None = None,
 ) -> None:
     s = smtp_settings or {}
-    host = (s.get("smtp_host") or get_setting("smtp_host")).strip()
+    if smtp_settings is None:
+        host = get_setting("smtp_host").strip()
+    else:
+        host = (s.get("smtp_host") or "").strip()
     if not host:
         raise RuntimeError("smtp host not configured")
 
-    port_setting = s.get("smtp_port") or get_setting("smtp_port")
+    if smtp_settings is None:
+        port_setting = get_setting("smtp_port")
+    else:
+        port_setting = s.get("smtp_port") or ""
     port_raw = (port_setting.strip() or "587")
     try:
         port = int(port_raw)
     except ValueError:
         raise RuntimeError("invalid smtp port")
 
-    security_setting = s.get("smtp_security") or get_setting("smtp_security")
+    if smtp_settings is None:
+        security_setting = get_setting("smtp_security")
+    else:
+        security_setting = s.get("smtp_security") or ""
     security = (security_setting.strip().lower() or "starttls")
-    timeout_raw = (
-        (s.get("smtp_timeout_seconds") or get_setting("smtp_timeout_seconds"))
-        .strip()
-        or "15"
-    )
+    if smtp_settings is None:
+        timeout_setting = get_setting("smtp_timeout_seconds")
+    else:
+        timeout_setting = s.get("smtp_timeout_seconds") or ""
+    timeout_raw = (timeout_setting.strip() or "15")
     try:
         timeout_seconds = int(timeout_raw)
     except ValueError:
         timeout_seconds = 15
 
-    username = (s.get("smtp_username") or get_setting("smtp_username")).strip()
+    if smtp_settings is None:
+        username = get_setting("smtp_username").strip()
+    else:
+        username = (s.get("smtp_username") or "").strip()
+
     password = (s.get("smtp_password") or "").strip()
-    if not password and not smtp_settings:
+    if not password and smtp_settings is None:
         password = _get_smtp_password()
 
-    ignore_raw = (
-        (
-            s.get("smtp_ignore_certificates")
-            or get_setting("smtp_ignore_certificates")
-        )
-        .strip()
-        .lower()
-    )
+    if smtp_settings is None:
+        ignore_setting = get_setting("smtp_ignore_certificates")
+    else:
+        ignore_setting = s.get("smtp_ignore_certificates") or ""
+    ignore_raw = ignore_setting.strip().lower()
     ignore_certs = ignore_raw in {"1", "true", "on", "yes"}
 
     ctx = ssl.create_default_context()

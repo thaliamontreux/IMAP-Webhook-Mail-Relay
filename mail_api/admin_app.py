@@ -6,6 +6,7 @@ import os
 import secrets
 import sqlite3
 import time
+import urllib.parse
 from typing import Any, Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -445,17 +446,56 @@ def create_admin_app() -> FastAPI:
             )
 
         if request.method.upper() == "POST":
-            form: Any = {}
-            try:
-                form = await request.form()
-            except Exception:
-                pass
-            token = str(form.get("csrf_token", ""))
+            raw_body = await request.body()
+
+            def _make_receive(body: bytes):
+                sent = False
+
+                async def _receive() -> dict:
+                    nonlocal sent
+                    if sent:
+                        return {
+                            "type": "http.request",
+                            "body": b"",
+                            "more_body": False,
+                        }
+                    sent = True
+                    return {
+                        "type": "http.request",
+                        "body": body,
+                        "more_body": False,
+                    }
+
+                return _receive
+
+            token = ""
+            ctype = (request.headers.get("content-type") or "").lower()
+            if "application/x-www-form-urlencoded" in ctype:
+                try:
+                    qs = urllib.parse.parse_qs(
+                        raw_body.decode("utf-8"),
+                        keep_blank_values=True,
+                    )
+                    token = str((qs.get("csrf_token") or [""])[0])
+                except Exception:
+                    token = ""
+            else:
+                # multipart/form-data or other content-types; use Starlette's parser
+                try:
+                    req_for_csrf = Request(request.scope, _make_receive(raw_body))
+                    form: Any = await req_for_csrf.form()
+                    token = str(form.get("csrf_token", ""))
+                except Exception:
+                    token = ""
+
             if not _is_csrf_valid(request, token):
                 return PlainTextResponse(
                     content="invalid csrf token",
                     status_code=403,
                 )
+
+            request_for_next = Request(request.scope, _make_receive(raw_body))
+            return await call_next(request_for_next)
 
         return await call_next(request)
 

@@ -1748,6 +1748,18 @@ def create_admin_app() -> FastAPI:
                 },
                 status_code=400,
             )
+
+        if len(password.encode("utf-8")) > 72:
+            return templates.TemplateResponse(
+                "bootstrap.html",
+                {
+                    "request": request,
+                    "error": "password too long (bcrypt max 72 bytes)",
+                    "prefix": _get_forwarded_prefix(request),
+                },
+                status_code=400,
+            )
+
         _create_admin(username.strip(), password)
         _audit(username.strip(), "bootstrap", "created initial admin")
         return RedirectResponse(
@@ -1877,6 +1889,12 @@ def create_admin_app() -> FastAPI:
         _require_ip_allowed(request)
         u = _require_login(request)
         if len(username.strip()) < 3 or len(password) < 10:
+            return RedirectResponse(
+                url=_prefixed(request, "/admins"),
+                status_code=302,
+            )
+
+        if len(password.encode("utf-8")) > 72:
             return RedirectResponse(
                 url=_prefixed(request, "/admins"),
                 status_code=302,

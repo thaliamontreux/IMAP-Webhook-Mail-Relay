@@ -771,6 +771,18 @@ def create_admin_app() -> FastAPI:
         ok = False
         err = ""
         try:
+            diag_host = (wh.smtp_host or "").strip()
+            diag_user = (wh.smtp_username or "").strip()
+            diag_ignore = (wh.smtp_ignore_certificates or "").strip().lower()
+            diag_timeout = (wh.smtp_timeout_seconds or "").strip()
+            diag_pwd_set = "1" if (wh.smtp_password or "").strip() else "0"
+            append_log_line(
+                "TEST SMTP CFG "
+                f"wh={webhook_id} host={diag_host} port={port} sec={security} "
+                f"user={diag_user} pwd_set={diag_pwd_set} "
+                f"timeout={diag_timeout} ignore_certs={diag_ignore} "
+                f"from={from_addr} env_from={envelope_from} to={test_to.strip()}"
+            )
             send_via_smtp(
                 envelope_from=envelope_from,
                 to_addr=test_to.strip(),
@@ -799,7 +811,11 @@ def create_admin_app() -> FastAPI:
                 "webhook_smtp_test",
                 f"ok id={webhook_id} to={test_to.strip()} port={port}",
             )
-            result = "SMTP test succeeded"
+            result = (
+                "SMTP test succeeded "
+                f"(host={diag_host} port={port} sec={security} user={diag_user} "
+                f"from={from_addr} env_from={envelope_from})"
+            )
         else:
             msg = (
                 f"TEST FAIL wh={webhook_id} to={test_to.strip()} "
@@ -814,7 +830,11 @@ def create_admin_app() -> FastAPI:
                     f"port={port} err={err}"
                 ),
             )
-            result = f"SMTP test failed: {err}"
+            result = (
+                f"SMTP test failed: {err} "
+                f"(host={diag_host} port={port} sec={security} user={diag_user} "
+                f"from={from_addr} env_from={envelope_from})"
+            )
 
         wh = get_webhook_by_id(webhook_id)
         return templates.TemplateResponse(

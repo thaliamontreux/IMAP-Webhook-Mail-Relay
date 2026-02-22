@@ -12,7 +12,7 @@ from passlib.context import CryptContext
 from .settings import get_or_create_session_secret
 
 
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_pwd = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:

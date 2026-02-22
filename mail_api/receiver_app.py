@@ -197,14 +197,18 @@ def create_receiver_app() -> FastAPI:
         link = v["link"]
         from_localpart = str(v["from_localpart"])
 
-        from_addr = (wh.sender_email or "").strip()
+        smtp_from = (wh.smtp_username or "").strip()
+        from_addr = smtp_from
+        using_smtp_username = bool(from_addr and "@" in from_addr)
+        if not using_smtp_username:
+            from_addr = (wh.sender_email or "").strip()
         if not from_addr or "@" not in from_addr:
             raise HTTPException(
                 status_code=503,
-                detail="sender email not configured",
+                detail="smtp username (email) not configured",
             )
 
-        if wh.allow_from_override and from_localpart:
+        if (not using_smtp_username) and wh.allow_from_override and from_localpart:
             domain = from_addr.split("@", 1)[1]
             from_addr = f"{from_localpart}@{domain}"
 

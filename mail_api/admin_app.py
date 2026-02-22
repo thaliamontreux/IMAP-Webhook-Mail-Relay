@@ -748,11 +748,13 @@ def create_admin_app() -> FastAPI:
 
         preset_label, security = _webhook_smtp_preset(port)
 
-        from_addr = (wh.sender_email or "").strip()
+        from_addr = (wh.smtp_username or "").strip()
+        if not from_addr or "@" not in from_addr:
+            from_addr = (wh.sender_email or "").strip()
         if not from_addr or "@" not in from_addr:
             raise HTTPException(
                 status_code=503,
-                detail="sender email not configured",
+                detail="smtp username (email) not configured",
             )
 
         envelope_from = from_addr

@@ -1,0 +1,10 @@
+[Unit]
+Description=Translife cluster discovery (periodic)
+
+[Timer]
+OnBootSec=10
+OnUnitActiveSec=20
+Unit=translife-cluster.service
+
+[Install]
+WantedBy=timers.target

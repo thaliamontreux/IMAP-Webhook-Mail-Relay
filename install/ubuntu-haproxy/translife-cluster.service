@@ -1,0 +1,13 @@
+[Unit]
+Description=Translife cluster discovery + HAProxy backend generator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/translife-cluster
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
